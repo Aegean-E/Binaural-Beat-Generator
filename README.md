@@ -1,4 +1,16 @@
-# Binaural Beat Generator by Aegean
+<div align="center">
+
+# Open Source Binaural Beat Project
+
+</div>
+
+
+<div align="left">
+  <img src="banner.png" width="1080" alt="Open Source Binaural Beat Project - Banner">
+  <br />
+</div>
+
+---
 
 A simple **binaural and monaural beat generator** with a **standalone executable** for Windows.  
 No Python installation is required—just download the `.exe` file and run it.
