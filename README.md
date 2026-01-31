@@ -69,7 +69,7 @@ Download the latest Windows executable from the [Releases](https://github.com/Ae
 
 ## License
 
-This project is free for **personal use**. For commercial use, please contact me. Donations are welcome via Patreon.
+This project is free for **personal use**. Donations are welcome via Patreon.
 
 - **Twitter**: [@Aegean_E](https://twitter.com/@Aegean_E)  
 - **YouTube**: [Aegean_E](https://youtube.com/@Aegean_E)  
