@@ -65,6 +65,4 @@ This project is free for **personal use**. For commercial use, please contact me
 
 ---
 
-## Author
-
 **Ægean - 2023**
