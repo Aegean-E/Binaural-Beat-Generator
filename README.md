@@ -63,7 +63,7 @@ Download the latest Windows executable from the [Releases](https://github.com/Ae
 ### Binaural Beats
 - 6 Hz (432 Hz or 528 Hz carrier)
 - 16 Hz (432 Hz or 528 Hz carrier)
-- 40 Hz (438 Hz or 528 Hz carrier)
+- 40 Hz (432 Hz or 528 Hz carrier)
 
 ---
 
