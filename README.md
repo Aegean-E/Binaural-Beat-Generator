@@ -1,6 +1,6 @@
 <div align="center">
 
-# Binaural Beat Generator 0.7
+# Binaural Beat Generator 0.8
 
 </div>
 
@@ -35,13 +35,23 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - Works as a **standalone `.exe` file** for Windows.
   
 ---
-## 🧠 Presets Included
+## 🧠 Presets System
 
-### Monaural Beats
+### User Presets (New Function) :
+
+- Save your own presets.
+- Remove saved presets.
+- Presets stored persistently in config.json.
+- Automatically loaded on startup.
+
+### Built-In Presets :
+
+
+#### Monaural Beats
 - **432 Hz**
 - **528 Hz**
 
-### Binaural Beats
+#### Binaural Beats
 - **6 Hz**  (Theta)
 - **16 Hz** (Beta)
 - **40 Hz** (Gamma)
@@ -49,6 +59,18 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 Available with :
 - **432 Hz carrier**
 - **528 Hz carrier**
+
+---
+
+## Theme Support
+
+- Theme selection saved automatically.
+
+### Available Themes : 
+- Darkly (Default)
+- Superhero
+- Flatly
+
 
 ---
 
