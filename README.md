@@ -33,8 +33,7 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - **Binaural Ramp Mode** : Gradually transitions the binaural beat frequency over time.
 - **Real-Time Status Display** (Current Binaural Beat, Frequencies, Remaining Time)
 - Works as a **standalone `.exe` file** for Windows.
-- **Fully Offline** — No Internet Connection Required
-
+  
 ---
 ## 🧠 Presets Included
 
