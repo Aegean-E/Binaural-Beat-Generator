@@ -34,7 +34,7 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - **Real-Time Status Display** (Current Binaural Beat, Frequencies, Remaining Time)
 - Theme support has been added.
 - Presets system has been redone. You can create your presets.
-- User Profile Import / Export function has been added.
+- **User Profile Import** / Export function has been added. You can share your presets and theme of your choice via this function.
 - Works as a **standalone `.exe` file** for Windows.
   
 ---
