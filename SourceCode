@@ -1,15 +1,24 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox
+import time
+import json
+from pathlib import Path
+
 import numpy as np
 import sounddevice as sd
 from scipy import signal
-from tkinter import messagebox
-import time
+
+import ttkbootstrap as tb
+
+import presets
 
 # Aegean
 
 is_playing = False
 stream = None
+
+live_status_after_id = None
 
 play_mode = "manual"  # "manual" or "ramp"
 play_start_time = 0.0
@@ -26,8 +35,93 @@ waveforms = {
     "Sawtooth": signal.sawtooth,
 }
 
+APP_DIR = Path.home() / ".binaural_beat_generator"
+CONFIG_PATH = APP_DIR / "config.json"
+
+
+def load_config() -> dict:
+    try:
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def save_config(cfg: dict) -> None:
+    try:
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+config = load_config()
+initial_theme = config.get("theme", "darkly")
+
+
+def _normalize_category(category: str) -> str:
+    c = str(category).strip().lower()
+    if c == "binaural":
+        return "Binaural"
+    if c == "monaural":
+        return "Monaural"
+    raise ValueError("Category must be 'Monaural' or 'Binaural'")
+
+
+def get_user_presets() -> dict:
+    up = config.get("user_presets", {})
+    return {
+        "Monaural": list(up.get("Monaural", [])),
+        "Binaural": list(up.get("Binaural", [])),
+    }
+
+
+def add_user_preset(category: str, label: str, left_hz: float, right_hz: float) -> None:
+    category = _normalize_category(category)
+
+    preset_obj = {
+        "label": str(label).strip(),
+        "left_hz": float(left_hz),
+        "right_hz": float(right_hz),
+    }
+    if not preset_obj["label"]:
+        raise ValueError("Preset Name Cannot be Empty")
+
+    up = get_user_presets()
+    up[category].append(preset_obj)
+
+    config["user_presets"] = up
+    save_config(config)
+
+
+def remove_user_preset(category: str, label: str) -> bool:
+    category = _normalize_category(category)
+
+    up = get_user_presets()
+    label = str(label).strip()
+
+    for i, p in enumerate(up[category]):
+        if str(p.get("label", "")).strip() == label:
+            up[category].pop(i)
+            config["user_presets"] = up
+            save_config(config)
+            return True
+
+    return False
+
+
+def get_all_presets() -> dict:
+    up = get_user_presets()
+    return {
+        "Monaural": list(presets.MONAURAL_PRESETS) + up["Monaural"],
+        "Binaural": list(presets.BINAURAL_PRESETS) + up["Binaural"],
+    }
+
+
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
+
 
 def soft_limiter(stereo_audio: np.ndarray, drive: float = 2.5) -> np.ndarray:
     limited = np.tanh(stereo_audio * drive) / np.tanh(drive)
@@ -38,11 +132,13 @@ def soft_limiter(stereo_audio: np.ndarray, drive: float = 2.5) -> np.ndarray:
 
     return limited
 
+
 def _compute_ramped_beat_hz(elapsed_s: float, start_beat_hz: float, end_beat_hz: float, ramp_s: float) -> float:
     if ramp_s <= 0:
         return end_beat_hz
     x = clamp(elapsed_s / ramp_s, 0.0, 1.0)
     return start_beat_hz + (end_beat_hz - start_beat_hz) * x
+
 
 def _start_stream(
     sample_rate: int,
@@ -112,11 +208,13 @@ def _start_stream(
     )
     stream.start()
 
+
 def play_audio():
-    global is_playing, stream
+    global is_playing
     global play_mode, play_start_time
     global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
     global manual_left_hz, manual_right_hz
+    global live_status_after_id
 
     if is_playing:
         stop_audio()
@@ -183,9 +281,22 @@ def play_audio():
 
     is_playing = True
 
+    if live_status_after_id is None:
+        update_live_status()
+
+
 def stop_audio():
     global is_playing, stream
     global play_mode
+    global live_status_after_id
+
+    # Stop UI update loop
+    if live_status_after_id is not None:
+        try:
+            root.after_cancel(live_status_after_id)
+        except Exception:
+            pass
+        live_status_after_id = None
 
     if stream is not None:
         try:
@@ -201,6 +312,7 @@ def stop_audio():
     is_playing = False
     play_mode = "manual"
 
+
 def show_about():
     about_text = """
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0). I appreciate any donations made on Patreon.
@@ -215,15 +327,147 @@ Patreon: patreon.com/Aegean_E
     """
     messagebox.showinfo("About", about_text)
 
-root = tk.Tk()
-root.title("Binaural Beat Generator 0.7")
+
+def set_theme(theme_name: str):
+    try:
+        root.style.theme_use(theme_name)
+        config["theme"] = theme_name
+        save_config(config)
+    except Exception as e:
+        messagebox.showerror("Theme Error", str(e))
+
+
+def apply_preset(left_hz: float, right_hz: float):
+    left_frequency_entry.delete(0, tk.END)
+    right_frequency_entry.delete(0, tk.END)
+    left_frequency_entry.insert(0, str(left_hz))
+    right_frequency_entry.insert(0, str(right_hz))
+
+
+def build_preset_buttons():
+    for w in monaural_beats_frame.winfo_children():
+        w.destroy()
+    for w in binaural_beats_frame.winfo_children():
+        w.destroy()
+
+    allp = get_all_presets()
+
+    for i, p in enumerate(allp["Monaural"]):
+        btn = ttk.Button(
+            monaural_beats_frame,
+            text=p["label"],
+            command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
+        )
+        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+
+    for i, p in enumerate(allp["Binaural"]):
+        btn = ttk.Button(
+            binaural_beats_frame,
+            text=p["label"],
+            command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
+        )
+        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+
+
+def save_current_as_preset():
+    try:
+        name = preset_name_entry.get().strip()
+        left_hz = float(left_frequency_entry.get())
+        right_hz = float(right_frequency_entry.get())
+
+        category = preset_category_var.get().strip()
+        if not category:
+            category = "Binaural" if abs(right_hz - left_hz) > 0 else "Monaural"
+
+        add_user_preset(category=category, label=name, left_hz=left_hz, right_hz=right_hz)
+
+        preset_name_entry.delete(0, tk.END)
+        build_preset_buttons()
+        messagebox.showinfo("Preset Saved", f"Saved preset '{name}'")
+    except Exception as e:
+        messagebox.showerror("Preset Error", str(e))
+
+
+def delete_preset():
+    try:
+        category = preset_category_var.get().strip()
+        label = preset_name_entry.get().strip()
+        if not label:
+            raise ValueError("Enter the preset name to remove (must match exactly).")
+
+        if messagebox.askyesno("Remove Preset", f"Remove user preset '{label}' from {category}?"):
+            removed = remove_user_preset(category=category, label=label)
+            if removed:
+                build_preset_buttons()
+                messagebox.showinfo("Preset Removed", f"Removed preset '{label}'")
+            else:
+                messagebox.showwarning("Not Found", f"No user preset named '{label}' found in {category}.")
+    except Exception as e:
+        messagebox.showerror("Remove Preset Error", str(e))
+
+
+def update_live_status():
+    global live_status_after_id
+
+    # If window is gone, do not reschedule
+    try:
+        if not root.winfo_exists():
+            live_status_after_id = None
+            return
+    except Exception:
+        live_status_after_id = None
+        return
+
+    if is_playing:
+        elapsed = time.time() - play_start_time
+
+        if play_mode == "ramp":
+            beat = _compute_ramped_beat_hz(elapsed, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s)
+            lf = ramp_carrier_hz - (beat / 2.0)
+            rf = ramp_carrier_hz + (beat / 2.0)
+
+            remaining_s = max(0.0, ramp_duration_s - elapsed)
+            rem_m = int(remaining_s // 60)
+            rem_s = int(remaining_s % 60)
+
+            status_var.set(
+                f"Beat: {beat:.2f} Hz | L: {lf:.2f} Hz | R: {rf:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
+            )
+        else:
+            beat = abs(manual_right_hz - manual_left_hz)
+            status_var.set(f"Beat: {beat:.2f} Hz | L: {manual_left_hz:.2f} Hz | R: {manual_right_hz:.2f} Hz")
+    else:
+        status_var.set("Beat: — Hz | L: — Hz | R: — Hz")
+
+    live_status_after_id = root.after(200, update_live_status)
+
+
+def on_close():
+    try:
+        stop_audio()
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
+root = tb.Window(themename=initial_theme)
+root.title("Binaural Beat Generator 0.8")
+root.protocol("WM_DELETE_WINDOW", on_close)
 
 menu_bar = tk.Menu(root)
 root.config(menu=menu_bar)
 
-about_menu = tk.Menu(menu_bar, tearoff=False)
-menu_bar.add_cascade(label="Settings", menu=about_menu)
-about_menu.add_command(label="About", command=show_about)
+settings_menu = tk.Menu(menu_bar, tearoff=False)
+menu_bar.add_cascade(label="Settings", menu=settings_menu)
+settings_menu.add_command(label="About", command=show_about)
+
+theme_menu = tk.Menu(settings_menu, tearoff=False)
+settings_menu.add_cascade(label="Theme", menu=theme_menu)
+theme_menu.add_command(label="Dark (Darkly)", command=lambda: set_theme("darkly"))
+theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
+theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
 
 left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
 left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
@@ -277,113 +521,46 @@ right_waveform_combobox = ttk.Combobox(
 right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
 right_waveform_combobox.set("Sine")
 
+# Presets UI (built-in presets.py + user presets from config.json)
 presets_frame = ttk.LabelFrame(root, text="Presets")
 presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
 
 monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
 monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-def preset_528_hz_monaural_beat():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "528")
-    left_frequency_entry.insert(0, "528")
-
-def preset_432_hz_monaural_beat():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "432")
-    left_frequency_entry.insert(0, "432")
-
-preset_button_7 = ttk.Button(monaural_beats_frame, text="528 Hz Monaural Beat", command=preset_528_hz_monaural_beat)
-preset_button_7.grid(row=0, column=0, padx=10, pady=10)
-
-preset_button_8 = ttk.Button(monaural_beats_frame, text="432 Hz Monaural Beat", command=preset_432_hz_monaural_beat)
-preset_button_8.grid(row=1, column=0, padx=10, pady=10)
-
 binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
 binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-def preset_6_hz_binaural_beat_528():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "531")
-    left_frequency_entry.insert(0, "525")
+create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
+create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-def preset_6_hz_binaural_beat_432():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "435")
-    left_frequency_entry.insert(0, "429")
+preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
+preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+preset_name_entry = ttk.Entry(create_preset_frame, width=28)
+preset_name_entry.grid(row=0, column=1, padx=10, pady=6, sticky="w")
 
-def preset_16_hz_binaural_beat_528():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "536")
-    left_frequency_entry.insert(0, "520")
-
-def preset_16_hz_binaural_beat_432():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "440")
-    left_frequency_entry.insert(0, "424")
-
-def preset_40_hz_binaural_beat_528():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "548")
-    left_frequency_entry.insert(0, "508")
-
-def preset_40_hz_binaural_beat_438():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "458")
-    left_frequency_entry.insert(0, "418")
-
-preset_button_1 = ttk.Button(
-    binaural_beats_frame,
-    text="6 Hz Binaural Beat, 528 Hz Carrier Frequency",
-    command=preset_6_hz_binaural_beat_528
+preset_category_label = ttk.Label(create_preset_frame, text="Type:")
+preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+preset_category_var = tk.StringVar(value="Binaural")
+preset_category_combo = ttk.Combobox(
+    create_preset_frame,
+    textvariable=preset_category_var,
+    values=["Binaural", "Monaural"],
+    state="readonly",
+    width=25
 )
-preset_button_1.grid(row=0, column=0, padx=10, pady=10)
+preset_category_combo.grid(row=1, column=1, padx=10, pady=6, sticky="w")
 
-preset_button_2 = ttk.Button(
-    binaural_beats_frame,
-    text="6 Hz Binaural Beat, 432 Hz Carrier Frequency",
-    command=preset_6_hz_binaural_beat_432
-)
-preset_button_2.grid(row=1, column=0, padx=10, pady=10)
+save_preset_button = ttk.Button(create_preset_frame, text="Save Current Frequencies as Preset", command=save_current_as_preset)
+save_preset_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-preset_button_3 = ttk.Button(
-    binaural_beats_frame,
-    text="16 Hz Binaural Beat, 528 Hz Carrier Frequency",
-    command=preset_16_hz_binaural_beat_528
-)
-preset_button_3.grid(row=2, column=0, padx=10, pady=10)
+delete_preset_button = ttk.Button(create_preset_frame, text="Remove Preset", command=delete_preset)
+delete_preset_button.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
 
-preset_button_4 = ttk.Button(
-    binaural_beats_frame,
-    text="16 Hz Binaural Beat, 432 Hz Carrier Frequency",
-    command=preset_16_hz_binaural_beat_432
-)
-preset_button_4.grid(row=3, column=0, padx=10, pady=10)
+build_preset_buttons()
 
-preset_button_5 = ttk.Button(
-    binaural_beats_frame,
-    text="40 Hz Binaural Beat, 528 Hz Carrier Frequency",
-    command=preset_40_hz_binaural_beat_528
-)
-preset_button_5.grid(row=4, column=0, padx=10, pady=10)
-
-preset_button_6 = ttk.Button(
-    binaural_beats_frame,
-    text="40 Hz Binaural Beat, 438 Hz Carrier Frequency",
-    command=preset_40_hz_binaural_beat_438
-)
-preset_button_6.grid(row=5, column=0, padx=10, pady=10)
-
-# Ramp controls
-ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp (Carrier ± Beat/2)")
+# Ramp controls (under frequency frames)
+ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
 ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
 ramp_enabled_var = tk.BooleanVar(value=False)
@@ -417,30 +594,6 @@ ramp_minutes_entry.insert(0, "30")
 status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
 status_label = ttk.Label(ramp_frame, textvariable=status_var)
 status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
-
-def update_live_status():
-    if is_playing:
-        elapsed = time.time() - play_start_time
-
-        if play_mode == "ramp":
-            beat = _compute_ramped_beat_hz(elapsed, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s)
-            lf = ramp_carrier_hz - (beat / 2.0)
-            rf = ramp_carrier_hz + (beat / 2.0)
-
-            remaining_s = max(0.0, ramp_duration_s - elapsed)
-            rem_m = int(remaining_s // 60)
-            rem_s = int(remaining_s % 60)
-
-            status_var.set(
-                f"Beat: {beat:.2f} Hz | L: {lf:.2f} Hz | R: {rf:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
-            )
-        else:
-            beat = abs(manual_right_hz - manual_left_hz)
-            status_var.set(f"Beat: {beat:.2f} Hz | L: {manual_left_hz:.2f} Hz | R: {manual_right_hz:.2f} Hz")
-    else:
-        status_var.set("Beat: — Hz | L: — Hz | R: — Hz")
-
-    root.after(200, update_live_status)
 
 update_live_status()
 
