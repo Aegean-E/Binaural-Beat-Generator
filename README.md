@@ -1,6 +1,6 @@
 <div align="center">
 
-# Binaural Beat Generator 0.8
+# Binaural Beat Generator 0.8.1
 
 </div>
 
@@ -34,6 +34,7 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - **Real-Time Status Display** (Current Binaural Beat, Frequencies, Remaining Time)
 - Theme support has been added.
 - Presets system has been redone. You can create your presets.
+- User profile Import / Export function has been added.
 - Works as a **standalone `.exe` file** for Windows.
   
 ---
