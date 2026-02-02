@@ -32,6 +32,8 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - **Simple GUI** using Tkinter with labeled frames and input fields.
 - **Binaural Ramp Mode** : Gradually transitions the binaural beat frequency over time.
 - **Real-Time Status Display** (Current Binaural Beat, Frequencies, Remaining Time)
+- Theme support has been added.
+- Presets system has been redone. You can create your presets.
 - Works as a **standalone `.exe` file** for Windows.
   
 ---
@@ -62,15 +64,10 @@ Available with :
 
 ---
 
-## Theme Support
-
-- Theme selection saved automatically.
-
 ### Available Themes : 
 - Darkly (Default)
 - Superhero
 - Flatly
-
 
 ---
 
