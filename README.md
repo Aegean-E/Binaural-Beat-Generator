@@ -1,12 +1,12 @@
 <div align="center">
 
-# Open Source Binaural Beat Project
+# Binaural Beat Generator
 
 </div>
 
 
 <div align="left">
-  <img src="banner.png" width="1080" alt="Open Source Binaural Beat Project - Banner">
+  <img src="banner.png" width="1080" alt="Binaural Beat Generator - Banner">
   <br />
 </div>
 
