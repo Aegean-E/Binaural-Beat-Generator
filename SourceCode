@@ -4,6 +4,7 @@ from tkinter import messagebox
 import time
 import json
 from pathlib import Path
+from tkinter import filedialog
 
 import numpy as np
 import sounddevice as sd
@@ -337,6 +338,69 @@ def set_theme(theme_name: str):
         messagebox.showerror("Theme Error", str(e))
 
 
+def export_config_json():
+    """Export the current in-memory config dict to a JSON file the user selects."""
+    try:
+        out_path = filedialog.asksaveasfilename(
+            title="Export config.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json")],
+            initialfile="config.json",
+        )
+        if not out_path:
+            return
+
+        Path(out_path).write_text(json.dumps(dict(config), indent=2), encoding="utf-8")
+        messagebox.showinfo("Export", f"Exported configuration to:\n{out_path}")
+    except Exception as e:
+        messagebox.showerror("Export Error", str(e))
+
+
+def import_config_json():
+    """Import config from a JSON file, persist it, and refresh UI (theme + presets)."""
+    global config
+
+    try:
+        in_path = filedialog.askopenfilename(
+            title="Import config.json",
+            filetypes=[("JSON files", "*.json")],
+        )
+        if not in_path:
+            return
+
+        imported = json.loads(Path(in_path).read_text(encoding="utf-8"))
+        if not isinstance(imported, dict):
+            raise ValueError("Invalid config file: root JSON value must be an object.")
+
+        # Normalize user_presets shape so preset UI won't crash
+        up = imported.get("user_presets", {})
+        if not isinstance(up, dict):
+            up = {}
+
+        imported["user_presets"] = {
+            "Monaural": list((up.get("Monaural") or [])) if isinstance(up.get("Monaural"), list) else [],
+            "Binaural": list((up.get("Binaural") or [])) if isinstance(up.get("Binaural"), list) else [],
+        }
+
+        config = imported
+        save_config(config)
+
+        # Apply theme if available
+        theme = config.get("theme")
+        if isinstance(theme, str) and theme.strip():
+            try:
+                root.style.theme_use(theme.strip())
+            except Exception:
+                pass
+
+        # Rebuild preset buttons to reflect imported presets
+        build_preset_buttons()
+
+        messagebox.showinfo("Import", f"Imported configuration from:\n{in_path}")
+    except Exception as e:
+        messagebox.showerror("Import Error", str(e))
+
+
 def apply_preset(left_hz: float, right_hz: float):
     left_frequency_entry.delete(0, tk.END)
     right_frequency_entry.delete(0, tk.END)
@@ -453,7 +517,7 @@ def on_close():
 
 
 root = tb.Window(themename=initial_theme)
-root.title("Binaural Beat Generator 0.8")
+root.title("Binaural Beat Generator 0.8.1")
 root.protocol("WM_DELETE_WINDOW", on_close)
 
 menu_bar = tk.Menu(root)
@@ -462,6 +526,11 @@ root.config(menu=menu_bar)
 settings_menu = tk.Menu(menu_bar, tearoff=False)
 menu_bar.add_cascade(label="Settings", menu=settings_menu)
 settings_menu.add_command(label="About", command=show_about)
+
+user_profile_menu = tk.Menu(settings_menu, tearoff=False)
+settings_menu.add_cascade(label="User Profile", menu=user_profile_menu)
+user_profile_menu.add_command(label="Import User Profile", command=import_config_json)
+user_profile_menu.add_command(label="Export User Profile", command=export_config_json)
 
 theme_menu = tk.Menu(settings_menu, tearoff=False)
 settings_menu.add_cascade(label="Theme", menu=theme_menu)
