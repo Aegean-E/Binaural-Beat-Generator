@@ -4,10 +4,21 @@ import numpy as np
 import sounddevice as sd
 from scipy import signal
 from tkinter import messagebox
+import time
 
-# Aegean_E
+# Aegean
 
 is_playing = False
+stream = None
+
+play_mode = "manual"  # "manual" or "ramp"
+play_start_time = 0.0
+ramp_carrier_hz = 432.0
+ramp_start_beat_hz = 20.0
+ramp_end_beat_hz = 3.0
+ramp_duration_s = 30.0 * 60.0
+manual_left_hz = 432.0
+manual_right_hz = 432.0
 
 waveforms = {
     "Sine": np.sin,
@@ -15,43 +26,184 @@ waveforms = {
     "Sawtooth": signal.sawtooth,
 }
 
-def generate_stereo_wave(left_frequency, right_frequency, duration_ms, left_volume, right_volume, left_waveform, right_waveform):
-    sample_rate = 44100
-    t = np.linspace(0, duration_ms / 1000, int(sample_rate * (duration_ms / 1000)), endpoint=False)
+def clamp(value, lo, hi):
+    return max(lo, min(hi, value))
 
-    left_wave = left_volume * waveforms[left_waveform](2 * np.pi * left_frequency * t)
-    right_wave = right_volume * waveforms[right_waveform](2 * np.pi * right_frequency * t)
+def soft_limiter(stereo_audio: np.ndarray, drive: float = 2.5) -> np.ndarray:
+    limited = np.tanh(stereo_audio * drive) / np.tanh(drive)
 
-    return left_wave, right_wave
+    peak = float(np.max(np.abs(limited)))
+    if peak > 1.0:
+        limited = limited / peak
+
+    return limited
+
+def _compute_ramped_beat_hz(elapsed_s: float, start_beat_hz: float, end_beat_hz: float, ramp_s: float) -> float:
+    if ramp_s <= 0:
+        return end_beat_hz
+    x = clamp(elapsed_s / ramp_s, 0.0, 1.0)
+    return start_beat_hz + (end_beat_hz - start_beat_hz) * x
+
+def _start_stream(
+    sample_rate: int,
+    left_volume: float,
+    right_volume: float,
+    left_waveform: str,
+    right_waveform: str,
+    use_ramp: bool,
+    left_frequency: float,
+    right_frequency: float,
+    carrier_hz: float,
+    start_beat_hz: float,
+    end_beat_hz: float,
+    ramp_minutes: float
+):
+    global stream
+
+    ramp_s = max(0.0, float(ramp_minutes) * 60.0)
+
+    phase_l = 0.0
+    phase_r = 0.0
+    start_time = time.time()
+
+    def callback(outdata, frames, _time_info, status):
+        nonlocal phase_l, phase_r
+        if status:
+            pass
+
+        now = time.time()
+        elapsed = now - start_time
+
+        if use_ramp:
+            beat_hz = _compute_ramped_beat_hz(elapsed, start_beat_hz, end_beat_hz, ramp_s)
+            lf = carrier_hz - (beat_hz / 2.0)
+            rf = carrier_hz + (beat_hz / 2.0)
+        else:
+            lf = left_frequency
+            rf = right_frequency
+
+        lf = max(0.0, float(lf))
+        rf = max(0.0, float(rf))
+
+        t = np.arange(frames, dtype=np.float64) / sample_rate
+
+        wl = 2.0 * np.pi * lf
+        wr = 2.0 * np.pi * rf
+        phase_vec_l = phase_l + wl * t
+        phase_vec_r = phase_r + wr * t
+
+        phase_l = (phase_l + wl * (frames / sample_rate)) % (2.0 * np.pi)
+        phase_r = (phase_r + wr * (frames / sample_rate)) % (2.0 * np.pi)
+
+        left = left_volume * waveforms[left_waveform](phase_vec_l)
+        right = right_volume * waveforms[right_waveform](phase_vec_r)
+
+        stereo = np.column_stack((left, right))
+        stereo = soft_limiter(stereo, drive=2.5).astype(np.float32, copy=False)
+
+        outdata[:] = stereo
+
+    stream = sd.OutputStream(
+        samplerate=sample_rate,
+        channels=2,
+        dtype="float32",
+        callback=callback,
+        blocksize=0
+    )
+    stream.start()
 
 def play_audio():
-    global is_playing
-    left_frequency = float(left_frequency_entry.get())
-    right_frequency = float(right_frequency_entry.get())
-    left_volume = float(left_volume_entry.get()) / 100
-    right_volume = float(right_volume_entry.get()) / 100
+    global is_playing, stream
+    global play_mode, play_start_time
+    global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
+    global manual_left_hz, manual_right_hz
+
+    if is_playing:
+        stop_audio()
+
+    sample_rate = 44100
+
+    left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
+    right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
+
     left_waveform = left_waveform_var.get()
     right_waveform = right_waveform_var.get()
 
-    duration = 1000  # Duration in milliseconds
-    left_wave, right_wave = generate_stereo_wave(left_frequency, right_frequency, duration, left_volume,
-                                                      right_volume, left_waveform, right_waveform)
+    use_ramp = bool(ramp_enabled_var.get())
+    play_start_time = time.time()
 
-    loop_audio_data = np.column_stack((left_wave, right_wave))
-    sd.play(loop_audio_data, samplerate=44100, loop=True)
+    if use_ramp:
+        play_mode = "ramp"
+
+        ramp_carrier_hz = float(carrier_entry.get())
+        ramp_start_beat_hz = float(start_beat_entry.get())
+        ramp_end_beat_hz = float(end_beat_entry.get())
+        ramp_duration_s = max(0.0, float(ramp_minutes_entry.get()) * 60.0)
+
+        beat_now = ramp_start_beat_hz
+        left_frequency_entry.delete(0, tk.END)
+        right_frequency_entry.delete(0, tk.END)
+        left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
+        right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
+
+        _start_stream(
+            sample_rate=sample_rate,
+            left_volume=left_volume,
+            right_volume=right_volume,
+            left_waveform=left_waveform,
+            right_waveform=right_waveform,
+            use_ramp=True,
+            left_frequency=0.0,
+            right_frequency=0.0,
+            carrier_hz=ramp_carrier_hz,
+            start_beat_hz=ramp_start_beat_hz,
+            end_beat_hz=ramp_end_beat_hz,
+            ramp_minutes=(ramp_duration_s / 60.0)
+        )
+    else:
+        play_mode = "manual"
+
+        manual_left_hz = float(left_frequency_entry.get())
+        manual_right_hz = float(right_frequency_entry.get())
+
+        _start_stream(
+            sample_rate=sample_rate,
+            left_volume=left_volume,
+            right_volume=right_volume,
+            left_waveform=left_waveform,
+            right_waveform=right_waveform,
+            use_ramp=False,
+            left_frequency=manual_left_hz,
+            right_frequency=manual_right_hz,
+            carrier_hz=0.0,
+            start_beat_hz=0.0,
+            end_beat_hz=0.0,
+            ramp_minutes=0.0
+        )
 
     is_playing = True
 
 def stop_audio():
-    global is_playing
-    if is_playing:
-        sd.stop()
-        is_playing = False
+    global is_playing, stream
+    global play_mode
 
+    if stream is not None:
+        try:
+            stream.stop()
+        except Exception:
+            pass
+        try:
+            stream.close()
+        except Exception:
+            pass
+        stream = None
+
+    is_playing = False
+    play_mode = "manual"
 
 def show_about():
     about_text = """
-This project is completely free for personal uses. I appreciate any donations made on Patreon.
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0). I appreciate any donations made on Patreon.
 
 Social Media Accounts:
 
@@ -59,12 +211,12 @@ Twitter: twitter.com/@Aegean_E
 Youtube: youtube.com/@Aegean_E
 Patreon: patreon.com/Aegean_E
 
-Ægean - 2023
+Ægean - 2023-2026
     """
     messagebox.showinfo("About", about_text)
 
 root = tk.Tk()
-root.title("Binaural Beat Generator by Aegean")
+root.title("Binaural Beat Generator 0.7")
 
 menu_bar = tk.Menu(root)
 root.config(menu=menu_bar)
@@ -91,7 +243,11 @@ left_volume_entry.insert(0, "50")
 left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
 left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
 left_waveform_var = tk.StringVar()
-left_waveform_combobox = ttk.Combobox(left_frequency_frame, textvariable=left_waveform_var, values=list(waveforms.keys()))
+left_waveform_combobox = ttk.Combobox(
+    left_frequency_frame,
+    textvariable=left_waveform_var,
+    values=list(waveforms.keys())
+)
 left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
 left_waveform_combobox.set("Sine")
 
@@ -113,9 +269,40 @@ right_volume_entry.insert(0, "50")
 right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
 right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
 right_waveform_var = tk.StringVar()
-right_waveform_combobox = ttk.Combobox(right_frequency_frame, textvariable=right_waveform_var, values=list(waveforms.keys()))
+right_waveform_combobox = ttk.Combobox(
+    right_frequency_frame,
+    textvariable=right_waveform_var,
+    values=list(waveforms.keys())
+)
 right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
 right_waveform_combobox.set("Sine")
+
+presets_frame = ttk.LabelFrame(root, text="Presets")
+presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+
+monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
+monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+def preset_528_hz_monaural_beat():
+    right_frequency_entry.delete(0, tk.END)
+    left_frequency_entry.delete(0, tk.END)
+    right_frequency_entry.insert(0, "528")
+    left_frequency_entry.insert(0, "528")
+
+def preset_432_hz_monaural_beat():
+    right_frequency_entry.delete(0, tk.END)
+    left_frequency_entry.delete(0, tk.END)
+    right_frequency_entry.insert(0, "432")
+    left_frequency_entry.insert(0, "432")
+
+preset_button_7 = ttk.Button(monaural_beats_frame, text="528 Hz Monaural Beat", command=preset_528_hz_monaural_beat)
+preset_button_7.grid(row=0, column=0, padx=10, pady=10)
+
+preset_button_8 = ttk.Button(monaural_beats_frame, text="432 Hz Monaural Beat", command=preset_432_hz_monaural_beat)
+preset_button_8.grid(row=1, column=0, padx=10, pady=10)
+
+binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
+binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
 def preset_6_hz_binaural_beat_528():
     right_frequency_entry.delete(0, tk.END)
@@ -153,55 +340,114 @@ def preset_40_hz_binaural_beat_438():
     right_frequency_entry.insert(0, "458")
     left_frequency_entry.insert(0, "418")
 
-def preset_528_hz_monaural_beat():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "528")
-    left_frequency_entry.insert(0, "528")
-
-def preset_432_hz_monaural_beat():
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.insert(0, "432")
-    left_frequency_entry.insert(0, "432")
-
-presets_frame = ttk.LabelFrame(root, text="Presets")
-presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
-
-monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
-monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-
-preset_button_7 = ttk.Button(monaural_beats_frame, text="528 Hz Monaural Beat", command=preset_528_hz_monaural_beat)
-preset_button_7.grid(row=0, column=0, padx=10, pady=10)
-
-preset_button_8 = ttk.Button(monaural_beats_frame, text="432 Hz Monaural Beat", command=preset_432_hz_monaural_beat)
-preset_button_8.grid(row=1, column=0, padx=10, pady=10)
-
-binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
-binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-
-preset_button_1 = ttk.Button(binaural_beats_frame, text="6 Hz Binaural Beat, 528 Hz Carrier Frequency", command=preset_6_hz_binaural_beat_528)
+preset_button_1 = ttk.Button(
+    binaural_beats_frame,
+    text="6 Hz Binaural Beat, 528 Hz Carrier Frequency",
+    command=preset_6_hz_binaural_beat_528
+)
 preset_button_1.grid(row=0, column=0, padx=10, pady=10)
 
-preset_button_2 = ttk.Button(binaural_beats_frame, text="6 Hz Binaural Beat, 432 Hz Carrier Frequency", command=preset_6_hz_binaural_beat_432)
+preset_button_2 = ttk.Button(
+    binaural_beats_frame,
+    text="6 Hz Binaural Beat, 432 Hz Carrier Frequency",
+    command=preset_6_hz_binaural_beat_432
+)
 preset_button_2.grid(row=1, column=0, padx=10, pady=10)
 
-preset_button_3 = ttk.Button(binaural_beats_frame, text="16 Hz Binaural Beat, 528 Hz Carrier Frequency", command=preset_16_hz_binaural_beat_528)
+preset_button_3 = ttk.Button(
+    binaural_beats_frame,
+    text="16 Hz Binaural Beat, 528 Hz Carrier Frequency",
+    command=preset_16_hz_binaural_beat_528
+)
 preset_button_3.grid(row=2, column=0, padx=10, pady=10)
 
-preset_button_4 = ttk.Button(binaural_beats_frame, text="16 Hz Binaural Beat, 432 Hz Carrier Frequency", command=preset_16_hz_binaural_beat_432)
+preset_button_4 = ttk.Button(
+    binaural_beats_frame,
+    text="16 Hz Binaural Beat, 432 Hz Carrier Frequency",
+    command=preset_16_hz_binaural_beat_432
+)
 preset_button_4.grid(row=3, column=0, padx=10, pady=10)
 
-preset_button_5 = ttk.Button(binaural_beats_frame, text="40 Hz Binaural Beat, 528 Hz Carrier Frequency", command=preset_40_hz_binaural_beat_528)
+preset_button_5 = ttk.Button(
+    binaural_beats_frame,
+    text="40 Hz Binaural Beat, 528 Hz Carrier Frequency",
+    command=preset_40_hz_binaural_beat_528
+)
 preset_button_5.grid(row=4, column=0, padx=10, pady=10)
 
-preset_button_6 = ttk.Button(binaural_beats_frame, text="40 Hz Binaural Beat, 438 Hz Carrier Frequency", command=preset_40_hz_binaural_beat_438)
+preset_button_6 = ttk.Button(
+    binaural_beats_frame,
+    text="40 Hz Binaural Beat, 438 Hz Carrier Frequency",
+    command=preset_40_hz_binaural_beat_438
+)
 preset_button_6.grid(row=5, column=0, padx=10, pady=10)
 
+# Ramp controls
+ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp (Carrier ± Beat/2)")
+ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+
+ramp_enabled_var = tk.BooleanVar(value=False)
+ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
+ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+
+carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
+carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+carrier_entry = ttk.Entry(ramp_frame, width=10)
+carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+carrier_entry.insert(0, "432")
+
+start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
+start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
+start_beat_entry = ttk.Entry(ramp_frame, width=10)
+start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+start_beat_entry.insert(0, "20")
+
+end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
+end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
+end_beat_entry = ttk.Entry(ramp_frame, width=10)
+end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
+end_beat_entry.insert(0, "3")
+
+ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
+ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
+ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
+ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
+ramp_minutes_entry.insert(0, "30")
+
+status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
+status_label = ttk.Label(ramp_frame, textvariable=status_var)
+status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+
+def update_live_status():
+    if is_playing:
+        elapsed = time.time() - play_start_time
+
+        if play_mode == "ramp":
+            beat = _compute_ramped_beat_hz(elapsed, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s)
+            lf = ramp_carrier_hz - (beat / 2.0)
+            rf = ramp_carrier_hz + (beat / 2.0)
+
+            remaining_s = max(0.0, ramp_duration_s - elapsed)
+            rem_m = int(remaining_s // 60)
+            rem_s = int(remaining_s % 60)
+
+            status_var.set(
+                f"Beat: {beat:.2f} Hz | L: {lf:.2f} Hz | R: {rf:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
+            )
+        else:
+            beat = abs(manual_right_hz - manual_left_hz)
+            status_var.set(f"Beat: {beat:.2f} Hz | L: {manual_left_hz:.2f} Hz | R: {manual_right_hz:.2f} Hz")
+    else:
+        status_var.set("Beat: — Hz | L: — Hz | R: — Hz")
+
+    root.after(200, update_live_status)
+
+update_live_status()
+
 generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
-generate_button.grid(row=1, column=0, pady=10)
+generate_button.grid(row=2, column=0, pady=10)
 
 stop_button = ttk.Button(root, text="Stop", command=stop_audio)
-stop_button.grid(row=1, column=1, pady=10)
+stop_button.grid(row=2, column=1, pady=10)
 
 root.mainloop()
