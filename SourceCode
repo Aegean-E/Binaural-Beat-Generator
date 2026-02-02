@@ -51,7 +51,7 @@ def stop_audio():
 
 def show_about():
     about_text = """
-This project is completely free for personal uses. For commercial purposes reach out to me via my social media accounts. I appreciate any donations made on Patreon.
+This project is completely free for personal uses. I appreciate any donations made on Patreon.
 
 Social Media Accounts:
 
