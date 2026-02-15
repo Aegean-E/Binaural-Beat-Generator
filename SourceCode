@@ -546,6 +546,33 @@ def on_close():
             logger.error("Error closing application", exc_info=True)
 
 
+def create_frequency_control_frame(parent, title, column, waveform_options, default_freq="432", default_vol="50", default_waveform="Sine"):
+    frame = ttk.LabelFrame(parent, text=title)
+    frame.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
+
+    ttk.Label(frame, text="Frequency:").grid(row=0, column=0, padx=10, pady=10)
+    freq_entry = ttk.Entry(frame)
+    freq_entry.grid(row=0, column=1, padx=10, pady=10)
+    freq_entry.insert(0, default_freq)
+
+    ttk.Label(frame, text="Volume (%):").grid(row=1, column=0, padx=10, pady=10)
+    vol_entry = ttk.Entry(frame)
+    vol_entry.grid(row=1, column=1, padx=10, pady=10)
+    vol_entry.insert(0, default_vol)
+
+    ttk.Label(frame, text="Waveform:").grid(row=2, column=0, padx=10, pady=10)
+    waveform_var = tk.StringVar()
+    waveform_combobox = ttk.Combobox(
+        frame,
+        textvariable=waveform_var,
+        values=waveform_options
+    )
+    waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
+    waveform_combobox.set(default_waveform)
+
+    return freq_entry, vol_entry, waveform_var, waveform_combobox
+
+
 if __name__ == "__main__":
     root = tb.Window(themename=initial_theme)
     root.title("Binaural Beat Generator 0.8.1")
@@ -569,57 +596,13 @@ if __name__ == "__main__":
     theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
     theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
 
-    left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
-    left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-
-    left_frequency_label = ttk.Label(left_frequency_frame, text="Frequency:")
-    left_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-    left_frequency_entry = ttk.Entry(left_frequency_frame)
-    left_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-    left_frequency_entry.insert(0, "432")
-
-    left_volume_label = ttk.Label(left_frequency_frame, text="Volume (%):")
-    left_volume_label.grid(row=1, column=0, padx=10, pady=10)
-    left_volume_entry = ttk.Entry(left_frequency_frame)
-    left_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-    left_volume_entry.insert(0, "50")
-
-    left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
-    left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-    left_waveform_var = tk.StringVar()
-    left_waveform_combobox = ttk.Combobox(
-        left_frequency_frame,
-        textvariable=left_waveform_var,
-        values=list(waveforms.keys())
+    left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox = create_frequency_control_frame(
+        root, "Left Ear Frequency (Hz)", 0, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
     )
-    left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-    left_waveform_combobox.set("Sine")
 
-    right_frequency_frame = ttk.LabelFrame(root, text="Right Ear Frequency (Hz)")
-    right_frequency_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-
-    right_frequency_label = ttk.Label(right_frequency_frame, text="Frequency:")
-    right_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-    right_frequency_entry = ttk.Entry(right_frequency_frame)
-    right_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-    right_frequency_entry.insert(0, "432")
-
-    right_volume_label = ttk.Label(right_frequency_frame, text="Volume (%):")
-    right_volume_label.grid(row=1, column=0, padx=10, pady=10)
-    right_volume_entry = ttk.Entry(right_frequency_frame)
-    right_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-    right_volume_entry.insert(0, "50")
-
-    right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
-    right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-    right_waveform_var = tk.StringVar()
-    right_waveform_combobox = ttk.Combobox(
-        right_frequency_frame,
-        textvariable=right_waveform_var,
-        values=list(waveforms.keys())
+    right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox = create_frequency_control_frame(
+        root, "Right Ear Frequency (Hz)", 1, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
     )
-    right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-    right_waveform_combobox.set("Sine")
 
     # Presets UI (built-in presets.py + user presets from config.json)
     presets_frame = ttk.LabelFrame(root, text="Presets")
