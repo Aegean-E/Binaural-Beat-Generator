@@ -81,11 +81,14 @@ def get_user_presets() -> dict:
 def add_user_preset(category: str, label: str, left_hz: float, right_hz: float) -> None:
     category = _normalize_category(category)
 
-    preset_obj = {
-        "label": str(label).strip(),
-        "left_hz": float(left_hz),
-        "right_hz": float(right_hz),
-    }
+    try:
+        preset_obj = {
+            "label": str(label).strip(),
+            "left_hz": float(left_hz),
+            "right_hz": float(right_hz),
+        }
+    except ValueError:
+        raise ValueError("Invalid numeric value for frequencies.")
     if not preset_obj["label"]:
         raise ValueError("Preset Name Cannot be Empty")
 
@@ -217,73 +220,76 @@ def play_audio():
     global manual_left_hz, manual_right_hz
     global live_status_after_id
 
-    if is_playing:
-        stop_audio()
+    try:
+        if is_playing:
+            stop_audio()
 
-    sample_rate = 44100
+        sample_rate = 44100
 
-    left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
-    right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
+        left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
+        right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
 
-    left_waveform = left_waveform_var.get()
-    right_waveform = right_waveform_var.get()
+        left_waveform = left_waveform_var.get()
+        right_waveform = right_waveform_var.get()
 
-    use_ramp = bool(ramp_enabled_var.get())
-    play_start_time = time.time()
+        use_ramp = bool(ramp_enabled_var.get())
+        play_start_time = time.time()
 
-    if use_ramp:
-        play_mode = "ramp"
+        if use_ramp:
+            play_mode = "ramp"
 
-        ramp_carrier_hz = float(carrier_entry.get())
-        ramp_start_beat_hz = float(start_beat_entry.get())
-        ramp_end_beat_hz = float(end_beat_entry.get())
-        ramp_duration_s = max(0.0, float(ramp_minutes_entry.get()) * 60.0)
+            ramp_carrier_hz = float(carrier_entry.get())
+            ramp_start_beat_hz = float(start_beat_entry.get())
+            ramp_end_beat_hz = float(end_beat_entry.get())
+            ramp_duration_s = max(0.0, float(ramp_minutes_entry.get()) * 60.0)
 
-        beat_now = ramp_start_beat_hz
-        left_frequency_entry.delete(0, tk.END)
-        right_frequency_entry.delete(0, tk.END)
-        left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
-        right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
+            beat_now = ramp_start_beat_hz
+            left_frequency_entry.delete(0, tk.END)
+            right_frequency_entry.delete(0, tk.END)
+            left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
+            right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
 
-        _start_stream(
-            sample_rate=sample_rate,
-            left_volume=left_volume,
-            right_volume=right_volume,
-            left_waveform=left_waveform,
-            right_waveform=right_waveform,
-            use_ramp=True,
-            left_frequency=0.0,
-            right_frequency=0.0,
-            carrier_hz=ramp_carrier_hz,
-            start_beat_hz=ramp_start_beat_hz,
-            end_beat_hz=ramp_end_beat_hz,
-            ramp_minutes=(ramp_duration_s / 60.0)
-        )
-    else:
-        play_mode = "manual"
+            _start_stream(
+                sample_rate=sample_rate,
+                left_volume=left_volume,
+                right_volume=right_volume,
+                left_waveform=left_waveform,
+                right_waveform=right_waveform,
+                use_ramp=True,
+                left_frequency=0.0,
+                right_frequency=0.0,
+                carrier_hz=ramp_carrier_hz,
+                start_beat_hz=ramp_start_beat_hz,
+                end_beat_hz=ramp_end_beat_hz,
+                ramp_minutes=(ramp_duration_s / 60.0)
+            )
+        else:
+            play_mode = "manual"
 
-        manual_left_hz = float(left_frequency_entry.get())
-        manual_right_hz = float(right_frequency_entry.get())
+            manual_left_hz = float(left_frequency_entry.get())
+            manual_right_hz = float(right_frequency_entry.get())
 
-        _start_stream(
-            sample_rate=sample_rate,
-            left_volume=left_volume,
-            right_volume=right_volume,
-            left_waveform=left_waveform,
-            right_waveform=right_waveform,
-            use_ramp=False,
-            left_frequency=manual_left_hz,
-            right_frequency=manual_right_hz,
-            carrier_hz=0.0,
-            start_beat_hz=0.0,
-            end_beat_hz=0.0,
-            ramp_minutes=0.0
-        )
+            _start_stream(
+                sample_rate=sample_rate,
+                left_volume=left_volume,
+                right_volume=right_volume,
+                left_waveform=left_waveform,
+                right_waveform=right_waveform,
+                use_ramp=False,
+                left_frequency=manual_left_hz,
+                right_frequency=manual_right_hz,
+                carrier_hz=0.0,
+                start_beat_hz=0.0,
+                end_beat_hz=0.0,
+                ramp_minutes=0.0
+            )
 
-    is_playing = True
+        is_playing = True
 
-    if live_status_after_id is None:
-        update_live_status()
+        if live_status_after_id is None:
+            update_live_status()
+    except ValueError:
+        messagebox.showerror("Input Error", "Please enter valid numeric values for all frequency and volume fields.")
 
 
 def stop_audio():
@@ -377,9 +383,23 @@ def import_config_json():
         if not isinstance(up, dict):
             up = {}
 
+        def _validate_presets(presets_list):
+            valid_presets = []
+            if not isinstance(presets_list, list):
+                return []
+            for p in presets_list:
+                if isinstance(p, dict) and "label" in p and "left_hz" in p and "right_hz" in p:
+                    try:
+                        p["left_hz"] = float(p["left_hz"])
+                        p["right_hz"] = float(p["right_hz"])
+                        valid_presets.append(p)
+                    except (ValueError, TypeError):
+                        continue
+            return valid_presets
+
         imported["user_presets"] = {
-            "Monaural": list((up.get("Monaural") or [])) if isinstance(up.get("Monaural"), list) else [],
-            "Binaural": list((up.get("Binaural") or [])) if isinstance(up.get("Binaural"), list) else [],
+            "Monaural": _validate_presets(up.get("Monaural")),
+            "Binaural": _validate_presets(up.get("Binaural")),
         }
 
         config = imported
@@ -516,160 +536,161 @@ def on_close():
             pass
 
 
-root = tb.Window(themename=initial_theme)
-root.title("Binaural Beat Generator 0.8.1")
-root.protocol("WM_DELETE_WINDOW", on_close)
+if __name__ == "__main__":
+    root = tb.Window(themename=initial_theme)
+    root.title("Binaural Beat Generator 0.8.1")
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
-menu_bar = tk.Menu(root)
-root.config(menu=menu_bar)
+    menu_bar = tk.Menu(root)
+    root.config(menu=menu_bar)
 
-settings_menu = tk.Menu(menu_bar, tearoff=False)
-menu_bar.add_cascade(label="Settings", menu=settings_menu)
-settings_menu.add_command(label="About", command=show_about)
+    settings_menu = tk.Menu(menu_bar, tearoff=False)
+    menu_bar.add_cascade(label="Settings", menu=settings_menu)
+    settings_menu.add_command(label="About", command=show_about)
 
-user_profile_menu = tk.Menu(settings_menu, tearoff=False)
-settings_menu.add_cascade(label="User Profile", menu=user_profile_menu)
-user_profile_menu.add_command(label="Import User Profile", command=import_config_json)
-user_profile_menu.add_command(label="Export User Profile", command=export_config_json)
+    user_profile_menu = tk.Menu(settings_menu, tearoff=False)
+    settings_menu.add_cascade(label="User Profile", menu=user_profile_menu)
+    user_profile_menu.add_command(label="Import User Profile", command=import_config_json)
+    user_profile_menu.add_command(label="Export User Profile", command=export_config_json)
 
-theme_menu = tk.Menu(settings_menu, tearoff=False)
-settings_menu.add_cascade(label="Theme", menu=theme_menu)
-theme_menu.add_command(label="Dark (Darkly)", command=lambda: set_theme("darkly"))
-theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
-theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
+    theme_menu = tk.Menu(settings_menu, tearoff=False)
+    settings_menu.add_cascade(label="Theme", menu=theme_menu)
+    theme_menu.add_command(label="Dark (Darkly)", command=lambda: set_theme("darkly"))
+    theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
+    theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
 
-left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
-left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
+    left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-left_frequency_label = ttk.Label(left_frequency_frame, text="Frequency:")
-left_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-left_frequency_entry = ttk.Entry(left_frequency_frame)
-left_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-left_frequency_entry.insert(0, "432")
+    left_frequency_label = ttk.Label(left_frequency_frame, text="Frequency:")
+    left_frequency_label.grid(row=0, column=0, padx=10, pady=10)
+    left_frequency_entry = ttk.Entry(left_frequency_frame)
+    left_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
+    left_frequency_entry.insert(0, "432")
 
-left_volume_label = ttk.Label(left_frequency_frame, text="Volume (%):")
-left_volume_label.grid(row=1, column=0, padx=10, pady=10)
-left_volume_entry = ttk.Entry(left_frequency_frame)
-left_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-left_volume_entry.insert(0, "50")
+    left_volume_label = ttk.Label(left_frequency_frame, text="Volume (%):")
+    left_volume_label.grid(row=1, column=0, padx=10, pady=10)
+    left_volume_entry = ttk.Entry(left_frequency_frame)
+    left_volume_entry.grid(row=1, column=1, padx=10, pady=10)
+    left_volume_entry.insert(0, "50")
 
-left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
-left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-left_waveform_var = tk.StringVar()
-left_waveform_combobox = ttk.Combobox(
-    left_frequency_frame,
-    textvariable=left_waveform_var,
-    values=list(waveforms.keys())
-)
-left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-left_waveform_combobox.set("Sine")
+    left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
+    left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
+    left_waveform_var = tk.StringVar()
+    left_waveform_combobox = ttk.Combobox(
+        left_frequency_frame,
+        textvariable=left_waveform_var,
+        values=list(waveforms.keys())
+    )
+    left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
+    left_waveform_combobox.set("Sine")
 
-right_frequency_frame = ttk.LabelFrame(root, text="Right Ear Frequency (Hz)")
-right_frequency_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    right_frequency_frame = ttk.LabelFrame(root, text="Right Ear Frequency (Hz)")
+    right_frequency_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-right_frequency_label = ttk.Label(right_frequency_frame, text="Frequency:")
-right_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-right_frequency_entry = ttk.Entry(right_frequency_frame)
-right_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-right_frequency_entry.insert(0, "432")
+    right_frequency_label = ttk.Label(right_frequency_frame, text="Frequency:")
+    right_frequency_label.grid(row=0, column=0, padx=10, pady=10)
+    right_frequency_entry = ttk.Entry(right_frequency_frame)
+    right_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
+    right_frequency_entry.insert(0, "432")
 
-right_volume_label = ttk.Label(right_frequency_frame, text="Volume (%):")
-right_volume_label.grid(row=1, column=0, padx=10, pady=10)
-right_volume_entry = ttk.Entry(right_frequency_frame)
-right_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-right_volume_entry.insert(0, "50")
+    right_volume_label = ttk.Label(right_frequency_frame, text="Volume (%):")
+    right_volume_label.grid(row=1, column=0, padx=10, pady=10)
+    right_volume_entry = ttk.Entry(right_frequency_frame)
+    right_volume_entry.grid(row=1, column=1, padx=10, pady=10)
+    right_volume_entry.insert(0, "50")
 
-right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
-right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-right_waveform_var = tk.StringVar()
-right_waveform_combobox = ttk.Combobox(
-    right_frequency_frame,
-    textvariable=right_waveform_var,
-    values=list(waveforms.keys())
-)
-right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-right_waveform_combobox.set("Sine")
+    right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
+    right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
+    right_waveform_var = tk.StringVar()
+    right_waveform_combobox = ttk.Combobox(
+        right_frequency_frame,
+        textvariable=right_waveform_var,
+        values=list(waveforms.keys())
+    )
+    right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
+    right_waveform_combobox.set("Sine")
 
-# Presets UI (built-in presets.py + user presets from config.json)
-presets_frame = ttk.LabelFrame(root, text="Presets")
-presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    # Presets UI (built-in presets.py + user presets from config.json)
+    presets_frame = ttk.LabelFrame(root, text="Presets")
+    presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
 
-monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
-monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
+    monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
-binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
+    binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
-create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
+    create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
-preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
-preset_name_entry = ttk.Entry(create_preset_frame, width=28)
-preset_name_entry.grid(row=0, column=1, padx=10, pady=6, sticky="w")
+    preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
+    preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+    preset_name_entry = ttk.Entry(create_preset_frame, width=28)
+    preset_name_entry.grid(row=0, column=1, padx=10, pady=6, sticky="w")
 
-preset_category_label = ttk.Label(create_preset_frame, text="Type:")
-preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
-preset_category_var = tk.StringVar(value="Binaural")
-preset_category_combo = ttk.Combobox(
-    create_preset_frame,
-    textvariable=preset_category_var,
-    values=["Binaural", "Monaural"],
-    state="readonly",
-    width=25
-)
-preset_category_combo.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    preset_category_label = ttk.Label(create_preset_frame, text="Type:")
+    preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    preset_category_var = tk.StringVar(value="Binaural")
+    preset_category_combo = ttk.Combobox(
+        create_preset_frame,
+        textvariable=preset_category_var,
+        values=["Binaural", "Monaural"],
+        state="readonly",
+        width=25
+    )
+    preset_category_combo.grid(row=1, column=1, padx=10, pady=6, sticky="w")
 
-save_preset_button = ttk.Button(create_preset_frame, text="Save Current Frequencies as Preset", command=save_current_as_preset)
-save_preset_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+    save_preset_button = ttk.Button(create_preset_frame, text="Save Current Frequencies as Preset", command=save_current_as_preset)
+    save_preset_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-delete_preset_button = ttk.Button(create_preset_frame, text="Remove Preset", command=delete_preset)
-delete_preset_button.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+    delete_preset_button = ttk.Button(create_preset_frame, text="Remove Preset", command=delete_preset)
+    delete_preset_button.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
 
-build_preset_buttons()
+    build_preset_buttons()
 
-# Ramp controls (under frequency frames)
-ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
-ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    # Ramp controls (under frequency frames)
+    ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
+    ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-ramp_enabled_var = tk.BooleanVar(value=False)
-ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
-ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+    ramp_enabled_var = tk.BooleanVar(value=False)
+    ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
+    ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
 
-carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
-carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
-carrier_entry = ttk.Entry(ramp_frame, width=10)
-carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
-carrier_entry.insert(0, "432")
+    carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
+    carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    carrier_entry = ttk.Entry(ramp_frame, width=10)
+    carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    carrier_entry.insert(0, "432")
 
-start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
-start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
-start_beat_entry = ttk.Entry(ramp_frame, width=10)
-start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
-start_beat_entry.insert(0, "20")
+    start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
+    start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
+    start_beat_entry = ttk.Entry(ramp_frame, width=10)
+    start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+    start_beat_entry.insert(0, "20")
 
-end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
-end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
-end_beat_entry = ttk.Entry(ramp_frame, width=10)
-end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
-end_beat_entry.insert(0, "3")
+    end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
+    end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
+    end_beat_entry = ttk.Entry(ramp_frame, width=10)
+    end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
+    end_beat_entry.insert(0, "3")
 
-ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
-ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
-ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
-ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
-ramp_minutes_entry.insert(0, "30")
+    ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
+    ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
+    ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
+    ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
+    ramp_minutes_entry.insert(0, "30")
 
-status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
-status_label = ttk.Label(ramp_frame, textvariable=status_var)
-status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+    status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
+    status_label = ttk.Label(ramp_frame, textvariable=status_var)
+    status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
 
-update_live_status()
+    update_live_status()
 
-generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
-generate_button.grid(row=2, column=0, pady=10)
+    generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
+    generate_button.grid(row=2, column=0, pady=10)
 
-stop_button = ttk.Button(root, text="Stop", command=stop_audio)
-stop_button.grid(row=2, column=1, pady=10)
+    stop_button = ttk.Button(root, text="Stop", command=stop_audio)
+    stop_button.grid(row=2, column=1, pady=10)
 
-root.mainloop()
+    root.mainloop()
