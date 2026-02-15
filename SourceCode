@@ -3,6 +3,7 @@ from tkinter import ttk
 from tkinter import messagebox
 import time
 import json
+import logging
 from pathlib import Path
 from tkinter import filedialog
 
@@ -15,6 +16,10 @@ import ttkbootstrap as tb
 import presets
 
 # Aegean
+
+# Configure logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 is_playing = False
 stream = None
@@ -295,19 +300,21 @@ def stop_audio():
     if live_status_after_id is not None:
         try:
             root.after_cancel(live_status_after_id)
-        except Exception:
-            pass
+        except tk.TclError as e:
+            logger.error(f"Error canceling UI update loop: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error canceling UI update loop: {e}")
         live_status_after_id = None
 
     if stream is not None:
         try:
             stream.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error stopping audio stream: {e}")
         try:
             stream.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error closing audio stream: {e}")
         stream = None
 
     is_playing = False
