@@ -191,12 +191,12 @@ def _start_stream(
         lf = max(0.0, float(lf))
         rf = max(0.0, float(rf))
 
-        t = np.arange(frames, dtype=np.float64) / sample_rate
+        t = np.arange(frames, dtype=np.float32) / sample_rate
 
-        wl = 2.0 * np.pi * lf
-        wr = 2.0 * np.pi * rf
-        phase_vec_l = phase_l + wl * t
-        phase_vec_r = phase_r + wr * t
+        wl = np.float32(2.0 * np.pi * lf)
+        wr = np.float32(2.0 * np.pi * rf)
+        phase_vec_l = np.float32(phase_l) + wl * t
+        phase_vec_r = np.float32(phase_r) + wr * t
 
         phase_l = (phase_l + wl * (frames / sample_rate)) % (2.0 * np.pi)
         phase_r = (phase_r + wr * (frames / sample_rate)) % (2.0 * np.pi)
