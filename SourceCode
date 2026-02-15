@@ -508,7 +508,7 @@ def update_live_status():
         if not root.winfo_exists():
             live_status_after_id = None
             return
-    except Exception:
+    except tk.TclError:
         live_status_after_id = None
         return
 
