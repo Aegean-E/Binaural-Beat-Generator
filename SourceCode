@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Aegean
 
+SAMPLE_RATE = 44100
+
 is_playing = False
 stream = None
 
@@ -234,7 +236,7 @@ def play_audio():
         if is_playing:
             stop_audio()
 
-        sample_rate = 44100
+        sample_rate = SAMPLE_RATE
 
         left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
         right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
