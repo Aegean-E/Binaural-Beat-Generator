@@ -415,12 +415,17 @@ def import_config_json():
                         continue
             return valid_presets
 
-        imported["user_presets"] = {
-            "Monaural": _validate_presets(up.get("Monaural")),
-            "Binaural": _validate_presets(up.get("Binaural")),
+        new_config = {
+            "user_presets": {
+                "Monaural": _validate_presets(up.get("Monaural")),
+                "Binaural": _validate_presets(up.get("Binaural")),
+            }
         }
 
-        config = imported
+        if "theme" in imported:
+            new_config["theme"] = imported["theme"]
+
+        config = new_config
         save_config(config)
 
         # Apply theme if available
