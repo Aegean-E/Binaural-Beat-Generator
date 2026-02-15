@@ -12,5 +12,5 @@ BINAURAL_PRESETS = [
     {"label": "16 Hz Binaural Beat, 528 Hz Carrier Frequency", "left_hz": 520.0, "right_hz": 536.0},
     {"label": "16 Hz Binaural Beat, 432 Hz Carrier Frequency", "left_hz": 424.0, "right_hz": 440.0},
     {"label": "40 Hz Binaural Beat, 528 Hz Carrier Frequency", "left_hz": 508.0, "right_hz": 548.0},
-    {"label": "40 Hz Binaural Beat, 438 Hz Carrier Frequency", "left_hz": 418.0, "right_hz": 458.0},
+    {"label": "40 Hz Binaural Beat, 432 Hz Carrier Frequency", "left_hz": 412.0, "right_hz": 452.0},
 ]
