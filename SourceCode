@@ -9,6 +9,7 @@ from tkinter import filedialog
 import numpy as np
 import sounddevice as sd
 from scipy import signal
+import functools
 
 import ttkbootstrap as tb
 
@@ -124,8 +125,13 @@ def clamp(value, lo, hi):
     return max(lo, min(hi, value))
 
 
+@functools.lru_cache(maxsize=16)
+def _get_tanh_drive(drive: float) -> float:
+    return np.tanh(drive)
+
+
 def soft_limiter(stereo_audio: np.ndarray, drive: float = 2.5) -> np.ndarray:
-    limited = np.tanh(stereo_audio * drive) / np.tanh(drive)
+    limited = np.tanh(stereo_audio * drive) / _get_tanh_drive(drive)
 
     peak = float(np.max(np.abs(limited)))
     if peak > 1.0:
