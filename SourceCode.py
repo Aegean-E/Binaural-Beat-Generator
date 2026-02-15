@@ -516,160 +516,161 @@ def on_close():
             pass
 
 
-root = tb.Window(themename=initial_theme)
-root.title("Binaural Beat Generator 0.8.1")
-root.protocol("WM_DELETE_WINDOW", on_close)
+if __name__ == "__main__":
+    root = tb.Window(themename=initial_theme)
+    root.title("Binaural Beat Generator 0.8.1")
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
-menu_bar = tk.Menu(root)
-root.config(menu=menu_bar)
+    menu_bar = tk.Menu(root)
+    root.config(menu=menu_bar)
 
-settings_menu = tk.Menu(menu_bar, tearoff=False)
-menu_bar.add_cascade(label="Settings", menu=settings_menu)
-settings_menu.add_command(label="About", command=show_about)
+    settings_menu = tk.Menu(menu_bar, tearoff=False)
+    menu_bar.add_cascade(label="Settings", menu=settings_menu)
+    settings_menu.add_command(label="About", command=show_about)
 
-user_profile_menu = tk.Menu(settings_menu, tearoff=False)
-settings_menu.add_cascade(label="User Profile", menu=user_profile_menu)
-user_profile_menu.add_command(label="Import User Profile", command=import_config_json)
-user_profile_menu.add_command(label="Export User Profile", command=export_config_json)
+    user_profile_menu = tk.Menu(settings_menu, tearoff=False)
+    settings_menu.add_cascade(label="User Profile", menu=user_profile_menu)
+    user_profile_menu.add_command(label="Import User Profile", command=import_config_json)
+    user_profile_menu.add_command(label="Export User Profile", command=export_config_json)
 
-theme_menu = tk.Menu(settings_menu, tearoff=False)
-settings_menu.add_cascade(label="Theme", menu=theme_menu)
-theme_menu.add_command(label="Dark (Darkly)", command=lambda: set_theme("darkly"))
-theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
-theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
+    theme_menu = tk.Menu(settings_menu, tearoff=False)
+    settings_menu.add_cascade(label="Theme", menu=theme_menu)
+    theme_menu.add_command(label="Dark (Darkly)", command=lambda: set_theme("darkly"))
+    theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
+    theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
 
-left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
-left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    left_frequency_frame = ttk.LabelFrame(root, text="Left Ear Frequency (Hz)")
+    left_frequency_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-left_frequency_label = ttk.Label(left_frequency_frame, text="Frequency:")
-left_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-left_frequency_entry = ttk.Entry(left_frequency_frame)
-left_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-left_frequency_entry.insert(0, "432")
+    left_frequency_label = ttk.Label(left_frequency_frame, text="Frequency:")
+    left_frequency_label.grid(row=0, column=0, padx=10, pady=10)
+    left_frequency_entry = ttk.Entry(left_frequency_frame)
+    left_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
+    left_frequency_entry.insert(0, "432")
 
-left_volume_label = ttk.Label(left_frequency_frame, text="Volume (%):")
-left_volume_label.grid(row=1, column=0, padx=10, pady=10)
-left_volume_entry = ttk.Entry(left_frequency_frame)
-left_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-left_volume_entry.insert(0, "50")
+    left_volume_label = ttk.Label(left_frequency_frame, text="Volume (%):")
+    left_volume_label.grid(row=1, column=0, padx=10, pady=10)
+    left_volume_entry = ttk.Entry(left_frequency_frame)
+    left_volume_entry.grid(row=1, column=1, padx=10, pady=10)
+    left_volume_entry.insert(0, "50")
 
-left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
-left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-left_waveform_var = tk.StringVar()
-left_waveform_combobox = ttk.Combobox(
-    left_frequency_frame,
-    textvariable=left_waveform_var,
-    values=list(waveforms.keys())
-)
-left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-left_waveform_combobox.set("Sine")
+    left_waveform_label = ttk.Label(left_frequency_frame, text="Waveform:")
+    left_waveform_label.grid(row=2, column=0, padx=10, pady=10)
+    left_waveform_var = tk.StringVar()
+    left_waveform_combobox = ttk.Combobox(
+        left_frequency_frame,
+        textvariable=left_waveform_var,
+        values=list(waveforms.keys())
+    )
+    left_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
+    left_waveform_combobox.set("Sine")
 
-right_frequency_frame = ttk.LabelFrame(root, text="Right Ear Frequency (Hz)")
-right_frequency_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    right_frequency_frame = ttk.LabelFrame(root, text="Right Ear Frequency (Hz)")
+    right_frequency_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-right_frequency_label = ttk.Label(right_frequency_frame, text="Frequency:")
-right_frequency_label.grid(row=0, column=0, padx=10, pady=10)
-right_frequency_entry = ttk.Entry(right_frequency_frame)
-right_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
-right_frequency_entry.insert(0, "432")
+    right_frequency_label = ttk.Label(right_frequency_frame, text="Frequency:")
+    right_frequency_label.grid(row=0, column=0, padx=10, pady=10)
+    right_frequency_entry = ttk.Entry(right_frequency_frame)
+    right_frequency_entry.grid(row=0, column=1, padx=10, pady=10)
+    right_frequency_entry.insert(0, "432")
 
-right_volume_label = ttk.Label(right_frequency_frame, text="Volume (%):")
-right_volume_label.grid(row=1, column=0, padx=10, pady=10)
-right_volume_entry = ttk.Entry(right_frequency_frame)
-right_volume_entry.grid(row=1, column=1, padx=10, pady=10)
-right_volume_entry.insert(0, "50")
+    right_volume_label = ttk.Label(right_frequency_frame, text="Volume (%):")
+    right_volume_label.grid(row=1, column=0, padx=10, pady=10)
+    right_volume_entry = ttk.Entry(right_frequency_frame)
+    right_volume_entry.grid(row=1, column=1, padx=10, pady=10)
+    right_volume_entry.insert(0, "50")
 
-right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
-right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
-right_waveform_var = tk.StringVar()
-right_waveform_combobox = ttk.Combobox(
-    right_frequency_frame,
-    textvariable=right_waveform_var,
-    values=list(waveforms.keys())
-)
-right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
-right_waveform_combobox.set("Sine")
+    right_waveform_label = ttk.Label(right_frequency_frame, text="Waveform:")
+    right_waveform_label.grid(row=2, column=0, padx=10, pady=10)
+    right_waveform_var = tk.StringVar()
+    right_waveform_combobox = ttk.Combobox(
+        right_frequency_frame,
+        textvariable=right_waveform_var,
+        values=list(waveforms.keys())
+    )
+    right_waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
+    right_waveform_combobox.set("Sine")
 
-# Presets UI (built-in presets.py + user presets from config.json)
-presets_frame = ttk.LabelFrame(root, text="Presets")
-presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    # Presets UI (built-in presets.py + user presets from config.json)
+    presets_frame = ttk.LabelFrame(root, text="Presets")
+    presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
 
-monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
-monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
+    monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
-binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
+    binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
-create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
+    create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
-preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
-preset_name_entry = ttk.Entry(create_preset_frame, width=28)
-preset_name_entry.grid(row=0, column=1, padx=10, pady=6, sticky="w")
+    preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
+    preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+    preset_name_entry = ttk.Entry(create_preset_frame, width=28)
+    preset_name_entry.grid(row=0, column=1, padx=10, pady=6, sticky="w")
 
-preset_category_label = ttk.Label(create_preset_frame, text="Type:")
-preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
-preset_category_var = tk.StringVar(value="Binaural")
-preset_category_combo = ttk.Combobox(
-    create_preset_frame,
-    textvariable=preset_category_var,
-    values=["Binaural", "Monaural"],
-    state="readonly",
-    width=25
-)
-preset_category_combo.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    preset_category_label = ttk.Label(create_preset_frame, text="Type:")
+    preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    preset_category_var = tk.StringVar(value="Binaural")
+    preset_category_combo = ttk.Combobox(
+        create_preset_frame,
+        textvariable=preset_category_var,
+        values=["Binaural", "Monaural"],
+        state="readonly",
+        width=25
+    )
+    preset_category_combo.grid(row=1, column=1, padx=10, pady=6, sticky="w")
 
-save_preset_button = ttk.Button(create_preset_frame, text="Save Current Frequencies as Preset", command=save_current_as_preset)
-save_preset_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+    save_preset_button = ttk.Button(create_preset_frame, text="Save Current Frequencies as Preset", command=save_current_as_preset)
+    save_preset_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-delete_preset_button = ttk.Button(create_preset_frame, text="Remove Preset", command=delete_preset)
-delete_preset_button.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+    delete_preset_button = ttk.Button(create_preset_frame, text="Remove Preset", command=delete_preset)
+    delete_preset_button.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
 
-build_preset_buttons()
+    build_preset_buttons()
 
-# Ramp controls (under frequency frames)
-ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
-ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    # Ramp controls (under frequency frames)
+    ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
+    ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-ramp_enabled_var = tk.BooleanVar(value=False)
-ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
-ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+    ramp_enabled_var = tk.BooleanVar(value=False)
+    ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
+    ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
 
-carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
-carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
-carrier_entry = ttk.Entry(ramp_frame, width=10)
-carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
-carrier_entry.insert(0, "432")
+    carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
+    carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    carrier_entry = ttk.Entry(ramp_frame, width=10)
+    carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    carrier_entry.insert(0, "432")
 
-start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
-start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
-start_beat_entry = ttk.Entry(ramp_frame, width=10)
-start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
-start_beat_entry.insert(0, "20")
+    start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
+    start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
+    start_beat_entry = ttk.Entry(ramp_frame, width=10)
+    start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+    start_beat_entry.insert(0, "20")
 
-end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
-end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
-end_beat_entry = ttk.Entry(ramp_frame, width=10)
-end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
-end_beat_entry.insert(0, "3")
+    end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
+    end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
+    end_beat_entry = ttk.Entry(ramp_frame, width=10)
+    end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
+    end_beat_entry.insert(0, "3")
 
-ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
-ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
-ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
-ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
-ramp_minutes_entry.insert(0, "30")
+    ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
+    ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
+    ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
+    ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
+    ramp_minutes_entry.insert(0, "30")
 
-status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
-status_label = ttk.Label(ramp_frame, textvariable=status_var)
-status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+    status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
+    status_label = ttk.Label(ramp_frame, textvariable=status_var)
+    status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
 
-update_live_status()
+    update_live_status()
 
-generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
-generate_button.grid(row=2, column=0, pady=10)
+    generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
+    generate_button.grid(row=2, column=0, pady=10)
 
-stop_button = ttk.Button(root, text="Stop", command=stop_audio)
-stop_button.grid(row=2, column=1, pady=10)
+    stop_button = ttk.Button(root, text="Stop", command=stop_audio)
+    stop_button.grid(row=2, column=1, pady=10)
 
-root.mainloop()
+    root.mainloop()
