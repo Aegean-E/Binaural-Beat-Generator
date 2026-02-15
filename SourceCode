@@ -399,6 +399,8 @@ def import_config_json():
                 return []
             for p in presets_list:
                 if isinstance(p, dict) and "label" in p and "left_hz" in p and "right_hz" in p:
+                    if not isinstance(p["label"], str):
+                        continue
                     try:
                         p["left_hz"] = float(p["left_hz"])
                         p["right_hz"] = float(p["right_hz"])
