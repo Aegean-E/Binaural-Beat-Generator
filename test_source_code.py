@@ -16,6 +16,8 @@ sys.modules['sounddevice'] = MagicMock()
 sys.modules['numpy'] = MagicMock()
 sys.modules['scipy'] = MagicMock()
 sys.modules['scipy.signal'] = MagicMock()
+sys.modules['scipy.io'] = MagicMock()
+sys.modules['scipy.io.wavfile'] = MagicMock()
 
 # Ensure local imports work
 sys.path.append(os.getcwd())

@@ -18,6 +18,8 @@ sys.modules["numpy"] = mock_numpy
 mock_scipy = MagicMock()
 sys.modules["scipy"] = mock_scipy
 sys.modules["scipy.signal"] = MagicMock()
+sys.modules["scipy.io"] = MagicMock()
+sys.modules["scipy.io.wavfile"] = MagicMock()
 
 # Create dummy sounddevice
 sys.modules["sounddevice"] = MagicMock()
