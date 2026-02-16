@@ -9,7 +9,6 @@ from tkinter import filedialog
 import logging
 import threading
 from dataclasses import dataclass
-import functools
 
 import numpy as np
 import sounddevice as sd
@@ -52,6 +51,7 @@ waveforms = {
 # =============================================================================
 
 def load_config() -> dict:
+    """Loads configuration from the JSON file."""
     try:
         if CONFIG_PATH.exists():
             return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -60,6 +60,7 @@ def load_config() -> dict:
     return {}
 
 def save_config(cfg: dict) -> None:
+    """Saves the configuration dictionary to the JSON file."""
     try:
         APP_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -126,9 +127,11 @@ def get_all_presets() -> dict:
 # =============================================================================
 
 def clamp(value, lo, hi):
+    """Clamps a value between lo and hi."""
     return max(lo, min(hi, value))
 
 def validate_audio_params(freq_l, freq_r, vol_l, vol_r, duration=None):
+    """Validates audio parameters (frequencies, volumes, duration)."""
     if not (20.0 <= freq_l <= 20000.0):
         return "Frequency must be between 20 Hz and 20000 Hz."
     if not (20.0 <= freq_r <= 20000.0):
@@ -142,6 +145,7 @@ def validate_audio_params(freq_l, freq_r, vol_l, vol_r, duration=None):
     return None
 
 def _compute_ramped_beat_hz(elapsed_s: float, start_beat_hz: float, end_beat_hz: float, ramp_s: float) -> float:
+    """Calculates the current beat frequency based on ramp progress."""
     if ramp_s <= 0:
         return end_beat_hz
     x = clamp(elapsed_s / ramp_s, 0.0, 1.0)
@@ -160,15 +164,93 @@ class AudioConfig:
     carrier_hz: float
     start_beat_hz: float
     end_beat_hz: float
-    ramp_minutes: float
+    ramp_duration_s: float
+
+def get_audio_config_from_ui() -> AudioConfig:
+    """Reads values from UI entries and returns an AudioConfig object."""
+    try:
+        left_volume_val = float(left_volume_entry.get())
+        right_volume_val = float(right_volume_entry.get())
+    except ValueError:
+        raise ValueError("Please enter valid numeric values for volume.")
+
+    left_volume = clamp(left_volume_val / 100.0, 0.0, 1.0)
+    right_volume = clamp(right_volume_val / 100.0, 0.0, 1.0)
+
+    left_waveform = left_waveform_var.get()
+    right_waveform = right_waveform_var.get()
+    use_ramp = bool(ramp_enabled_var.get())
+    sample_rate = 44100
+
+    if use_ramp:
+        try:
+            r_carrier = float(carrier_entry.get())
+            r_start = float(start_beat_entry.get())
+            r_end = float(end_beat_entry.get())
+            r_min = float(ramp_minutes_entry.get())
+        except ValueError:
+            raise ValueError("Please enter valid numeric values for ramp settings.")
+
+        if not (20.0 <= r_carrier <= 20000.0):
+             raise ValueError("Carrier frequency must be between 20 Hz and 20000 Hz.")
+        if not (0.1 <= r_start <= 100.0):
+             raise ValueError("Beat frequency must be between 0.1 Hz and 100 Hz.")
+        if not (0.1 <= r_end <= 100.0):
+             raise ValueError("Beat frequency must be between 0.1 Hz and 100 Hz.")
+
+        ramp_duration_s = max(0.0, r_min * 60.0)
+
+        return AudioConfig(
+            sample_rate=sample_rate,
+            left_volume=left_volume,
+            right_volume=right_volume,
+            left_waveform=left_waveform,
+            right_waveform=right_waveform,
+            use_ramp=True,
+            left_frequency=0.0,
+            right_frequency=0.0,
+            carrier_hz=r_carrier,
+            start_beat_hz=r_start,
+            end_beat_hz=r_end,
+            ramp_duration_s=ramp_duration_s
+        )
+    else:
+        try:
+            m_left = float(left_frequency_entry.get())
+            m_right = float(right_frequency_entry.get())
+        except ValueError:
+            raise ValueError("Please enter valid numeric values for frequencies.")
+
+        err = validate_audio_params(m_left, m_right, left_volume_val, right_volume_val)
+        if err:
+            raise ValueError(err)
+
+        return AudioConfig(
+            sample_rate=sample_rate,
+            left_volume=left_volume,
+            right_volume=right_volume,
+            left_waveform=left_waveform,
+            right_waveform=right_waveform,
+            use_ramp=False,
+            left_frequency=m_left,
+            right_frequency=m_right,
+            carrier_hz=0.0,
+            start_beat_hz=0.0,
+            end_beat_hz=0.0,
+            ramp_duration_s=0.0
+        )
 
 class BinauralGenerator:
+    """
+    Generates binaural or monaural beats based on the provided AudioConfig.
+    Handles waveform generation, ramping, and soft limiting.
+    """
     def __init__(self, cfg: AudioConfig):
         self.cfg = cfg
         self.phase_l = 0.0
         self.phase_r = 0.0
         self.samples_generated = 0
-        self.ramp_s = max(0.0, float(cfg.ramp_minutes) * 60.0)
+        self.ramp_s = cfg.ramp_duration_s
 
         # Resolve waveform functions
         # Default to Sine if not found to prevent crashes
@@ -209,45 +291,54 @@ class BinauralGenerator:
 
             lf_array = self.cfg.carrier_hz - (beat_hz / 2.0)
             rf_array = self.cfg.carrier_hz + (beat_hz / 2.0)
+
+            # Enforce positive frequency
+            lf_array = np.maximum(0.0, lf_array)
+            rf_array = np.maximum(0.0, rf_array)
+
+            # Calculate phase increments: 2 * pi * f / sr
+            inc_l = (2.0 * np.pi * lf_array / self.cfg.sample_rate)
+            inc_r = (2.0 * np.pi * rf_array / self.cfg.sample_rate)
+
+            # Calculate cumulative phase shift
+            # We start at self.phase_l. Sample 0 is at self.phase_l.
+            # Sample n is at self.phase_l + sum(inc[0]...inc[n-1])
+            # np.cumsum returns [inc0, inc0+inc1, ...]. We shift it.
+
+            phase_shift_l = np.concatenate(([0.0], np.cumsum(inc_l)[:-1]))
+            phase_shift_r = np.concatenate(([0.0], np.cumsum(inc_r)[:-1]))
+
+            phase_vec_l = self.phase_l + phase_shift_l
+            phase_vec_r = self.phase_r + phase_shift_r
+
+            # Calculate next block seed phase
+            # Total change over this block is sum of all increments
+            self.phase_l = (self.phase_l + np.sum(inc_l)) % (2.0 * np.pi)
+            self.phase_r = (self.phase_r + np.sum(inc_r)) % (2.0 * np.pi)
+
         else:
-            # Constant frequency
-            lf_array = np.full(frames, self.cfg.left_frequency, dtype=np.float64)
-            rf_array = np.full(frames, self.cfg.right_frequency, dtype=np.float64)
+            # Constant frequency optimization
+            # Avoid full array allocation and cumsum for constant frequency
 
-        # Enforce positive frequency
-        lf_array = np.maximum(0.0, lf_array)
-        rf_array = np.maximum(0.0, rf_array)
+            freq_l = max(0.0, self.cfg.left_frequency)
+            freq_r = max(0.0, self.cfg.right_frequency)
 
-        # Calculate phase increments: 2 * pi * f / sr
-        inc_l = (2.0 * np.pi * lf_array / self.cfg.sample_rate)
-        inc_r = (2.0 * np.pi * rf_array / self.cfg.sample_rate)
+            # Phase increment per sample
+            inc_l = (2.0 * np.pi * freq_l / self.cfg.sample_rate)
+            inc_r = (2.0 * np.pi * freq_r / self.cfg.sample_rate)
 
-        # Calculate cumulative phase shift
-        # We start at self.phase_l. Sample 0 is at self.phase_l.
-        # Sample n is at self.phase_l + sum(inc[0]...inc[n-1])
-        # np.cumsum returns [inc0, inc0+inc1, ...]. We shift it.
+            # Create time vector for this block (0, 1, ..., frames-1)
+            t_vec = np.arange(frames, dtype=np.float64)
 
-        phase_shift_l = np.concatenate(([0.0], np.cumsum(inc_l)[:-1]))
-        phase_shift_r = np.concatenate(([0.0], np.cumsum(inc_r)[:-1]))
+            # phase[n] = phase_start + n * inc
+            phase_vec_l = self.phase_l + t_vec * inc_l
+            phase_vec_r = self.phase_r + t_vec * inc_r
 
-        phase_vec_l = self.phase_l + phase_shift_l
-        phase_vec_r = self.phase_r + phase_shift_r
-
-        # Calculate next block seed phase
-        # Total change over this block is sum of all increments
-        self.phase_l = (self.phase_l + np.sum(inc_l)) % (2.0 * np.pi)
-        self.phase_r = (self.phase_r + np.sum(inc_r)) % (2.0 * np.pi)
+            # Update phase for next block
+            self.phase_l = (self.phase_l + frames * inc_l) % (2.0 * np.pi)
+            self.phase_r = (self.phase_r + frames * inc_r) % (2.0 * np.pi)
 
         # Generate Waveforms
-        # Cast phase to float32 if needed by wave funcs, but numpy handles float64 fine.
-        # However, large phase values in float32 lose precision.
-        # Since we just added phase_shift, phase_vec can be large.
-        # But we only care about phase mod 2pi for sin.
-        # If we use np.sin, it handles large values but precision degrades.
-        # It's better to wrap phase_vec if it gets huge, but here we reset self.phase_l every block.
-        # Within a block, phase_shift is small (max ~600 for 100ms block).
-        # So precision is fine.
-
         left = self.cfg.left_volume * self.left_wave_func(phase_vec_l)
         right = self.cfg.right_volume * self.right_wave_func(phase_vec_r)
 
@@ -279,8 +370,6 @@ class BinauralGenerator:
                 return stereo
 
             # Generate fade out ramp
-            # ramp goes from 1.0 down to 0.0 over fade_out_len
-            # t relative to start of fade out
             t_fade = np.arange(self.fade_out_counter, self.fade_out_counter + frames, dtype=np.float32)
             ramp_out = 1.0 - (t_fade / self.fade_out_len)
             ramp_out = np.clip(ramp_out, 0.0, 1.0)
@@ -300,6 +389,10 @@ class BinauralGenerator:
         return stereo.astype(np.float32, copy=False)
 
 class AudioEngine:
+    """
+    Manages the audio playback stream using sounddevice.
+    Handles thread safety for starting and stopping playback.
+    """
     def __init__(self):
         self._stream = None
         self.generator = None
@@ -314,19 +407,22 @@ class AudioEngine:
 
         with self._lock:
             try:
-                self.generator = BinauralGenerator(cfg)
+                # Capture generator in local variable for callback to ensure thread safety
+                gen = BinauralGenerator(cfg)
+                self.generator = gen
                 self.current_config = cfg
 
                 def callback(outdata, frames, time, status):
                     if status:
                         logger.warning(f"Audio status: {status}")
                     try:
-                        # Generate audio
-                        data = self.generator.generate_block(frames)
+                        # Generate audio using local 'gen' reference
+                        # This avoids race conditions if self.generator is set to None by stop()
+                        data = gen.generate_block(frames)
                         outdata[:] = data
 
                         # Check if finished (fade out complete)
-                        if self.generator.is_finished:
+                        if gen.is_finished:
                             raise sd.CallbackStop
 
                     except Exception as e:
@@ -334,8 +430,6 @@ class AudioEngine:
                             logger.error("Audio callback error", exc_info=True)
                         # Silence on error
                         outdata.fill(0)
-                        # Don't abort immediately on glitch, but maybe log
-                        # If critical, raise sd.CallbackAbort
 
                 self._stream = sd.OutputStream(
                     samplerate=cfg.sample_rate,
@@ -421,6 +515,7 @@ def stop_audio():
 # =============================================================================
 
 def _run_export_thread(cfg, filename, duration, progress_win, progress_bar, progress_label, on_success, on_error):
+    """Background thread function for exporting audio to a WAV file."""
     try:
         sample_rate = cfg.sample_rate
         total_frames = int(duration * sample_rate)
@@ -467,92 +562,12 @@ def _run_export_thread(cfg, filename, duration, progress_win, progress_bar, prog
         root.after(0, lambda: on_error(e))
 
 def export_audio_file():
+    """Initiates the audio export process with UI dialogs."""
     stop_audio()
 
     try:
-        # Get parameters from UI
-        try:
-            left_volume = float(left_volume_entry.get())
-            right_volume = float(right_volume_entry.get())
-        except ValueError:
-            messagebox.showerror("Input Error", "Invalid volume values.")
-            return
-
-        left_vol_norm = clamp(left_volume / 100.0, 0.0, 1.0)
-        right_vol_norm = clamp(right_volume / 100.0, 0.0, 1.0)
-
-        left_waveform = left_waveform_var.get()
-        right_waveform = right_waveform_var.get()
-        use_ramp = bool(ramp_enabled_var.get())
-
-        sample_rate = 44100
-
-        if use_ramp:
-            try:
-                ramp_carrier_hz = float(carrier_entry.get())
-                ramp_start_beat_hz = float(start_beat_entry.get())
-                ramp_end_beat_hz = float(end_beat_entry.get())
-                ramp_minutes = float(ramp_minutes_entry.get())
-            except ValueError:
-                messagebox.showerror("Input Error", "Invalid ramp parameters.")
-                return
-
-            ramp_duration_s = max(0.0, ramp_minutes * 60.0)
-
-            # Basic validation for ramp
-            if not (20.0 <= ramp_carrier_hz <= 20000.0):
-                 messagebox.showerror("Input Error", "Carrier frequency must be between 20 Hz and 20000 Hz.")
-                 return
-            if not (0.1 <= ramp_start_beat_hz <= 100.0):
-                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
-                 return
-            if not (0.1 <= ramp_end_beat_hz <= 100.0):
-                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
-                 return
-
-            cfg = AudioConfig(
-                sample_rate=sample_rate,
-                left_volume=left_vol_norm,
-                right_volume=right_vol_norm,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=True,
-                left_frequency=0.0,
-                right_frequency=0.0,
-                carrier_hz=ramp_carrier_hz,
-                start_beat_hz=ramp_start_beat_hz,
-                end_beat_hz=ramp_end_beat_hz,
-                ramp_minutes=ramp_minutes
-            )
-            default_duration = ramp_duration_s
-        else:
-            try:
-                manual_left_hz = float(left_frequency_entry.get())
-                manual_right_hz = float(right_frequency_entry.get())
-            except ValueError:
-                messagebox.showerror("Input Error", "Invalid frequency values.")
-                return
-
-            err = validate_audio_params(manual_left_hz, manual_right_hz, left_volume, right_volume)
-            if err:
-                messagebox.showerror("Input Error", err)
-                return
-
-            cfg = AudioConfig(
-                sample_rate=sample_rate,
-                left_volume=left_vol_norm,
-                right_volume=right_vol_norm,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=False,
-                left_frequency=manual_left_hz,
-                right_frequency=manual_right_hz,
-                carrier_hz=0.0,
-                start_beat_hz=0.0,
-                end_beat_hz=0.0,
-                ramp_minutes=0.0
-            )
-            default_duration = 300.0 # 5 mins default
+        cfg = get_audio_config_from_ui()
+        default_duration = cfg.ramp_duration_s if cfg.use_ramp else 300.0
 
         duration_str = simpledialog.askstring("Export Audio", f"Enter duration in seconds:", initialvalue=str(int(default_duration)))
         if not duration_str:
@@ -579,10 +594,6 @@ def export_audio_file():
         progress_win.title("Exporting...")
         progress_win.geometry("300x100")
 
-        # Make modal?
-        # progress_win.transient(root)
-        # progress_win.grab_set()
-
         progress_label = ttk.Label(progress_win, text="Generating audio...")
         progress_label.pack(pady=10)
         progress_bar = ttk.Progressbar(progress_win, mode='determinate')
@@ -607,116 +618,45 @@ def export_audio_file():
         t = threading.Thread(target=_run_export_thread, args=(cfg, filename, duration, progress_win, progress_bar, progress_label, on_success, on_error))
         t.start()
 
+    except ValueError as e:
+        messagebox.showerror("Input Error", str(e))
     except Exception as e:
         logger.error("Export initialization failed", exc_info=True)
         messagebox.showerror("Export Error", str(e))
 
 def play_audio():
+    """Starts audio playback based on current UI settings."""
     global play_mode
     global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
     global manual_left_hz, manual_right_hz
     global live_status_after_id
 
     try:
-        # Don't call stop_audio() blindly, engine.start() handles restart safely.
-        # But we want to update UI state, so maybe stopping is good?
-        # Let's trust engine.start() to swap streams.
+        cfg = get_audio_config_from_ui()
 
-        sample_rate = 44100
-
-        try:
-            left_volume_val = float(left_volume_entry.get())
-            right_volume_val = float(right_volume_entry.get())
-        except ValueError:
-             messagebox.showerror("Input Error", "Please enter valid numeric values for volume.")
-             return
-
-        left_volume = clamp(left_volume_val / 100.0, 0.0, 1.0)
-        right_volume = clamp(right_volume_val / 100.0, 0.0, 1.0)
-
-        left_waveform = left_waveform_var.get()
-        right_waveform = right_waveform_var.get()
-
-        use_ramp = bool(ramp_enabled_var.get())
-
-        if use_ramp:
+        if cfg.use_ramp:
             play_mode = "ramp"
-
-            try:
-                ramp_carrier_hz = float(carrier_entry.get())
-                ramp_start_beat_hz = float(start_beat_entry.get())
-                ramp_end_beat_hz = float(end_beat_entry.get())
-                ramp_minutes = float(ramp_minutes_entry.get())
-            except ValueError:
-                messagebox.showerror("Input Error", "Please enter valid numeric values for ramp settings.")
-                return
-
-            if not (20.0 <= ramp_carrier_hz <= 20000.0):
-                 messagebox.showerror("Input Error", "Carrier frequency must be between 20 Hz and 20000 Hz.")
-                 return
-            if not (0.1 <= ramp_start_beat_hz <= 100.0):
-                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
-                 return
-            if not (0.1 <= ramp_end_beat_hz <= 100.0):
-                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
-                 return
-
-            ramp_duration_s = max(0.0, ramp_minutes * 60.0)
+            ramp_carrier_hz = cfg.carrier_hz
+            ramp_start_beat_hz = cfg.start_beat_hz
+            ramp_end_beat_hz = cfg.end_beat_hz
+            ramp_duration_s = cfg.ramp_duration_s
 
             beat_now = ramp_start_beat_hz
             left_frequency_entry.delete(0, tk.END)
             right_frequency_entry.delete(0, tk.END)
             left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
             right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
-
-            cfg = AudioConfig(
-                sample_rate=sample_rate,
-                left_volume=left_volume,
-                right_volume=right_volume,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=True,
-                left_frequency=0.0,
-                right_frequency=0.0,
-                carrier_hz=ramp_carrier_hz,
-                start_beat_hz=ramp_start_beat_hz,
-                end_beat_hz=ramp_end_beat_hz,
-                ramp_minutes=(ramp_duration_s / 60.0)
-            )
         else:
             play_mode = "manual"
-
-            try:
-                manual_left_hz = float(left_frequency_entry.get())
-                manual_right_hz = float(right_frequency_entry.get())
-            except ValueError:
-                messagebox.showerror("Input Error", "Please enter valid numeric values for frequencies.")
-                return
-
-            err = validate_audio_params(manual_left_hz, manual_right_hz, left_volume_val, right_volume_val)
-            if err:
-                messagebox.showerror("Input Error", err)
-                return
-
-            cfg = AudioConfig(
-                sample_rate=sample_rate,
-                left_volume=left_volume,
-                right_volume=right_volume,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=False,
-                left_frequency=manual_left_hz,
-                right_frequency=manual_right_hz,
-                carrier_hz=0.0,
-                start_beat_hz=0.0,
-                end_beat_hz=0.0,
-                ramp_minutes=0.0
-            )
+            manual_left_hz = cfg.left_frequency
+            manual_right_hz = cfg.right_frequency
 
         audio_engine.start(cfg)
 
         if live_status_after_id is None:
             update_live_status()
+    except ValueError as e:
+         messagebox.showerror("Input Error", str(e))
     except Exception as e:
         logger.error("Error playing audio", exc_info=True)
         messagebox.showerror("Error", f"An unexpected error occurred: {e}")
@@ -899,6 +839,7 @@ def delete_preset():
         messagebox.showerror("Remove Preset Error", str(e))
 
 def update_live_status():
+    """Updates the status bar with current frequencies and remaining time."""
     global live_status_after_id
 
     # If window is gone, do not reschedule
@@ -968,7 +909,16 @@ def create_frequency_control_frame(parent, title, column, waveform_options, defa
 
     return freq_entry, vol_entry, waveform_var, waveform_combobox
 
-if __name__ == "__main__":
+def main():
+    """Main application entry point. Initializes UI and starts the event loop."""
+    global root
+    global left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox
+    global right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox
+    global monaural_beats_frame, binaural_beats_frame
+    global preset_name_entry, preset_category_var
+    global carrier_entry, start_beat_entry, end_beat_entry, ramp_minutes_entry
+    global status_var, ramp_enabled_var, brainwave_var
+
     import sys
     if "--debug" in sys.argv:
         print("========================================")
@@ -989,7 +939,7 @@ if __name__ == "__main__":
                 carrier_hz=0.0,
                 start_beat_hz=0.0,
                 end_beat_hz=0.0,
-                ramp_minutes=0.0
+                ramp_duration_s=0.0
             )
 
             gen = BinauralGenerator(test_cfg)
@@ -1038,7 +988,7 @@ if __name__ == "__main__":
         # I'll let it run.
 
     root = tb.Window(themename=initial_theme)
-    root.title("Binaural Beat Generator 0.8.1")
+    root.title("Binaural Beat Generator 0.8.2")
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     menu_bar = tk.Menu(root)

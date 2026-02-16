@@ -56,7 +56,7 @@ class TestDSPLogic(unittest.TestCase):
             left_waveform="Sine", right_waveform="Sine",
             use_ramp=False,
             left_frequency=100, right_frequency=100,
-            carrier_hz=0, start_beat_hz=0, end_beat_hz=0, ramp_minutes=0
+            carrier_hz=0, start_beat_hz=0, end_beat_hz=0, ramp_duration_s=0
         )
         gen = source_code.BinauralGenerator(cfg)
 
@@ -86,7 +86,7 @@ class TestDSPLogic(unittest.TestCase):
             left_waveform="Sine", right_waveform="Sine",
             use_ramp=False,
             left_frequency=100, right_frequency=100,
-            carrier_hz=0, start_beat_hz=0, end_beat_hz=0, ramp_minutes=0
+            carrier_hz=0, start_beat_hz=0, end_beat_hz=0, ramp_duration_s=0
         )
         gen = source_code.BinauralGenerator(cfg)
 
