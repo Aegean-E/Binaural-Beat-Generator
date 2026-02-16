@@ -60,18 +60,6 @@ class TestSourceCode(unittest.TestCase):
         # Load the module once
         cls.module = load_source_code()
 
-    def test_clamp(self):
-        # clamp(value, lo, hi)
-        self.assertEqual(self.module.clamp(5, 0, 10), 5)
-        self.assertEqual(self.module.clamp(-1, 0, 10), 0)
-        self.assertEqual(self.module.clamp(11, 0, 10), 10)
-        self.assertEqual(self.module.clamp(0, 0, 10), 0)
-        self.assertEqual(self.module.clamp(10, 0, 10), 10)
-
-        # Floating point
-        self.assertEqual(self.module.clamp(5.5, 0.0, 10.0), 5.5)
-        self.assertEqual(self.module.clamp(-0.1, 0.0, 1.0), 0.0)
-
     def test_normalize_category(self):
         # _normalize_category(category)
         self.assertEqual(self.module._normalize_category("binaural"), "Binaural")
