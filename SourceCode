@@ -455,28 +455,23 @@ def apply_preset(left_hz: float, right_hz: float):
 
 
 def build_preset_buttons():
-    for w in monaural_beats_frame.winfo_children():
-        w.destroy()
-    for w in binaural_beats_frame.winfo_children():
-        w.destroy()
-
     allp = get_all_presets()
+    category_frames = {
+        "Monaural": monaural_beats_frame,
+        "Binaural": binaural_beats_frame,
+    }
 
-    for i, p in enumerate(allp["Monaural"]):
-        btn = ttk.Button(
-            monaural_beats_frame,
-            text=p["label"],
-            command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
-        )
-        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+    for category, frame in category_frames.items():
+        for w in frame.winfo_children():
+            w.destroy()
 
-    for i, p in enumerate(allp["Binaural"]):
-        btn = ttk.Button(
-            binaural_beats_frame,
-            text=p["label"],
-            command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
-        )
-        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+        for i, p in enumerate(allp[category]):
+            btn = ttk.Button(
+                frame,
+                text=p["label"],
+                command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
+            )
+            btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
 
 
 def save_current_as_preset():
