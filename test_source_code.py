@@ -88,5 +88,33 @@ class TestSaveConfig(unittest.TestCase):
         mock_app_dir.mkdir.assert_called_once()
         mock_config_path.write_text.assert_called_once()
 
+
+class TestNormalizeCategory(unittest.TestCase):
+    def test_normalize_category_binaural(self):
+        """Test valid Binaural inputs (case-insensitive, whitespace)."""
+        self.assertEqual(source_code._normalize_category("Binaural"), "Binaural")
+        self.assertEqual(source_code._normalize_category("binaural"), "Binaural")
+        self.assertEqual(source_code._normalize_category("  Binaural  "), "Binaural")
+        self.assertEqual(source_code._normalize_category("BINAURAL"), "Binaural")
+
+    def test_normalize_category_monaural(self):
+        """Test valid Monaural inputs (case-insensitive, whitespace)."""
+        self.assertEqual(source_code._normalize_category("Monaural"), "Monaural")
+        self.assertEqual(source_code._normalize_category("monaural"), "Monaural")
+        self.assertEqual(source_code._normalize_category("  Monaural  "), "Monaural")
+        self.assertEqual(source_code._normalize_category("MONAURAL"), "Monaural")
+
+    def test_normalize_category_invalid(self):
+        """Test invalid inputs raise ValueError."""
+        with self.assertRaisesRegex(ValueError, "Category must be 'Monaural' or 'Binaural'"):
+            source_code._normalize_category("Stereo")
+        with self.assertRaisesRegex(ValueError, "Category must be 'Monaural' or 'Binaural'"):
+            source_code._normalize_category("")
+        with self.assertRaisesRegex(ValueError, "Category must be 'Monaural' or 'Binaural'"):
+            source_code._normalize_category("random")
+        with self.assertRaisesRegex(ValueError, "Category must be 'Monaural' or 'Binaural'"):
+            source_code._normalize_category(123)  # Non-string input converted to string "123"
+
+
 if __name__ == '__main__':
     unittest.main()
