@@ -223,11 +223,78 @@ def _start_stream(
     stream.start()
 
 
+def _read_volume_and_waveform():
+    """Reads volume and waveform settings from the UI."""
+    left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
+    right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
+    left_waveform = left_waveform_var.get()
+    right_waveform = right_waveform_var.get()
+    return left_volume, right_volume, left_waveform, right_waveform
+
+
+def _setup_ramp_mode(sample_rate, left_volume, right_volume, left_waveform, right_waveform):
+    """Configures and starts audio stream in ramp mode."""
+    global play_mode
+    global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
+
+    play_mode = "ramp"
+
+    ramp_carrier_hz = float(carrier_entry.get())
+    ramp_start_beat_hz = float(start_beat_entry.get())
+    ramp_end_beat_hz = float(end_beat_entry.get())
+    ramp_duration_s = max(0.0, float(ramp_minutes_entry.get()) * 60.0)
+
+    beat_now = ramp_start_beat_hz
+    left_frequency_entry.delete(0, tk.END)
+    right_frequency_entry.delete(0, tk.END)
+    left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
+    right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
+
+    _start_stream(
+        sample_rate=sample_rate,
+        left_volume=left_volume,
+        right_volume=right_volume,
+        left_waveform=left_waveform,
+        right_waveform=right_waveform,
+        use_ramp=True,
+        left_frequency=0.0,
+        right_frequency=0.0,
+        carrier_hz=ramp_carrier_hz,
+        start_beat_hz=ramp_start_beat_hz,
+        end_beat_hz=ramp_end_beat_hz,
+        ramp_minutes=(ramp_duration_s / 60.0)
+    )
+
+
+def _setup_manual_mode(sample_rate, left_volume, right_volume, left_waveform, right_waveform):
+    """Configures and starts audio stream in manual mode."""
+    global play_mode
+    global manual_left_hz, manual_right_hz
+
+    play_mode = "manual"
+
+    manual_left_hz = float(left_frequency_entry.get())
+    manual_right_hz = float(right_frequency_entry.get())
+
+    _start_stream(
+        sample_rate=sample_rate,
+        left_volume=left_volume,
+        right_volume=right_volume,
+        left_waveform=left_waveform,
+        right_waveform=right_waveform,
+        use_ramp=False,
+        left_frequency=manual_left_hz,
+        right_frequency=manual_right_hz,
+        carrier_hz=0.0,
+        start_beat_hz=0.0,
+        end_beat_hz=0.0,
+        ramp_minutes=0.0
+    )
+
+
 def play_audio():
     global is_playing
-    global play_mode, play_start_time
-    global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
-    global manual_left_hz, manual_right_hz
+    global play_start_time
     global live_status_after_id
 
     try:
@@ -236,63 +303,16 @@ def play_audio():
 
         sample_rate = 44100
 
-        left_volume = clamp(float(left_volume_entry.get()) / 100.0, 0.0, 1.0)
-        right_volume = clamp(float(right_volume_entry.get()) / 100.0, 0.0, 1.0)
-
-        left_waveform = left_waveform_var.get()
-        right_waveform = right_waveform_var.get()
+        # Get common parameters
+        left_volume, right_volume, left_waveform, right_waveform = _read_volume_and_waveform()
 
         use_ramp = bool(ramp_enabled_var.get())
         play_start_time = time.time()
 
         if use_ramp:
-            play_mode = "ramp"
-
-            ramp_carrier_hz = float(carrier_entry.get())
-            ramp_start_beat_hz = float(start_beat_entry.get())
-            ramp_end_beat_hz = float(end_beat_entry.get())
-            ramp_duration_s = max(0.0, float(ramp_minutes_entry.get()) * 60.0)
-
-            beat_now = ramp_start_beat_hz
-            left_frequency_entry.delete(0, tk.END)
-            right_frequency_entry.delete(0, tk.END)
-            left_frequency_entry.insert(0, str(ramp_carrier_hz - beat_now / 2.0))
-            right_frequency_entry.insert(0, str(ramp_carrier_hz + beat_now / 2.0))
-
-            _start_stream(
-                sample_rate=sample_rate,
-                left_volume=left_volume,
-                right_volume=right_volume,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=True,
-                left_frequency=0.0,
-                right_frequency=0.0,
-                carrier_hz=ramp_carrier_hz,
-                start_beat_hz=ramp_start_beat_hz,
-                end_beat_hz=ramp_end_beat_hz,
-                ramp_minutes=(ramp_duration_s / 60.0)
-            )
+            _setup_ramp_mode(sample_rate, left_volume, right_volume, left_waveform, right_waveform)
         else:
-            play_mode = "manual"
-
-            manual_left_hz = float(left_frequency_entry.get())
-            manual_right_hz = float(right_frequency_entry.get())
-
-            _start_stream(
-                sample_rate=sample_rate,
-                left_volume=left_volume,
-                right_volume=right_volume,
-                left_waveform=left_waveform,
-                right_waveform=right_waveform,
-                use_ramp=False,
-                left_frequency=manual_left_hz,
-                right_frequency=manual_right_hz,
-                carrier_hz=0.0,
-                start_beat_hz=0.0,
-                end_beat_hz=0.0,
-                ramp_minutes=0.0
-            )
+            _setup_manual_mode(sample_rate, left_volume, right_volume, left_waveform, right_waveform)
 
         is_playing = True
 
