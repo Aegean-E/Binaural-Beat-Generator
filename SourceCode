@@ -18,6 +18,7 @@ from scipy.io import wavfile
 import ttkbootstrap as tb
 
 import presets
+import verification
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -968,6 +969,74 @@ def create_frequency_control_frame(parent, title, column, waveform_options, defa
     return freq_entry, vol_entry, waveform_var, waveform_combobox
 
 if __name__ == "__main__":
+    import sys
+    if "--debug" in sys.argv:
+        print("========================================")
+        print("SCIENTIFIC VERIFICATION & DEBUG REPORT")
+        print("========================================")
+        try:
+            # Generate a test signal: 432 Hz Carrier, 10 Hz Beat (Alpha)
+            print("[INFO] Generating 1s test signal (432Hz Carrier, 10Hz Beat)...")
+            test_cfg = AudioConfig(
+                sample_rate=44100,
+                left_volume=0.8,
+                right_volume=0.8,
+                left_waveform="Sine",
+                right_waveform="Sine",
+                use_ramp=False,
+                left_frequency=427.0, # 432 - 5
+                right_frequency=437.0, # 432 + 5
+                carrier_hz=0.0,
+                start_beat_hz=0.0,
+                end_beat_hz=0.0,
+                ramp_minutes=0.0
+            )
+
+            gen = BinauralGenerator(test_cfg)
+            audio = gen.generate_block(44100)
+
+            print(f"[INFO] Signal generated. Shape: {audio.shape}, Type: {audio.dtype}")
+            print(f"[METRICS] Base Freq: 432 Hz")
+            print(f"[METRICS] Target Beat: 10 Hz")
+            print(f"[METRICS] Total Samples: {len(audio)}")
+
+            # Run Validation
+            print("[INFO] Running Signal Validation...")
+            errors = verification.validate_signal(audio, 44100, 427.0, 437.0, 1.0)
+
+            if errors:
+                print("[FAIL] Signal Verification Failed:")
+                for e in errors:
+                    print(f"  - {e}")
+            else:
+                print("[PASS] Signal Verification Passed.")
+                print("  - Frequency Accuracy: OK")
+                print("  - Amplitude Safety: OK")
+                print("  - DC Offset: OK")
+                print("  - Stereo Separation: OK")
+
+            # Run Export Validation
+            print("\n[INFO] Running Export Validation...")
+            exp_errors = verification.validate_export(BinauralGenerator, test_cfg, 1.0)
+            if exp_errors:
+                print("[FAIL] Export Verification Failed:")
+                for e in exp_errors:
+                    print(f"  - {e}")
+            else:
+                print("[PASS] Export Verification Passed.")
+
+        except Exception as e:
+            print(f"[ERROR] Debug execution failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+        print("========================================")
+        # Continue to app or exit?
+        # Usually debug report prints and exits or prints and continues.
+        # If the user just wants the report, they might prefer exit.
+        # But if they use --debug to debug the running app, they want it to run.
+        # I'll let it run.
+
     root = tb.Window(themename=initial_theme)
     root.title("Binaural Beat Generator 0.8.1")
     root.protocol("WM_DELETE_WINDOW", on_close)
@@ -1040,37 +1109,63 @@ if __name__ == "__main__":
     ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
     ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
+    # Brainwave Preset Selector
+    def apply_brainwave_preset(event):
+        selected = brainwave_var.get()
+        # Extract name part if formatted like "Alpha (8 - 12 Hz)"
+        # But dictionary keys match values in combobox.
+        if selected in presets.BRAINWAVE_RANGES:
+            start, end = presets.BRAINWAVE_RANGES[selected]
+            start_beat_entry.delete(0, tk.END)
+            start_beat_entry.insert(0, str(start))
+            end_beat_entry.delete(0, tk.END)
+            end_beat_entry.insert(0, str(end))
+
+    brainwave_label = ttk.Label(ramp_frame, text="Brainwave Preset:")
+    brainwave_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+
+    brainwave_var = tk.StringVar()
+    brainwave_combo = ttk.Combobox(
+        ramp_frame,
+        textvariable=brainwave_var,
+        values=list(presets.BRAINWAVE_RANGES.keys()),
+        state="readonly",
+        width=25
+    )
+    brainwave_combo.grid(row=0, column=1, padx=10, pady=6, sticky="w")
+    brainwave_combo.bind("<<ComboboxSelected>>", apply_brainwave_preset)
+
     ramp_enabled_var = tk.BooleanVar(value=False)
     ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
-    ramp_enabled_check.grid(row=0, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+    ramp_enabled_check.grid(row=1, column=0, columnspan=2, padx=10, pady=6, sticky="w")
 
     carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
-    carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    carrier_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
     carrier_entry = ttk.Entry(ramp_frame, width=10)
-    carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    carrier_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
     carrier_entry.insert(0, "432")
 
     start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
-    start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
+    start_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
     start_beat_entry = ttk.Entry(ramp_frame, width=10)
-    start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+    start_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
     start_beat_entry.insert(0, "20")
 
     end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
-    end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
+    end_beat_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
     end_beat_entry = ttk.Entry(ramp_frame, width=10)
-    end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
+    end_beat_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
     end_beat_entry.insert(0, "3")
 
     ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
-    ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
+    ramp_minutes_label.grid(row=5, column=0, padx=10, pady=6, sticky="e")
     ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
-    ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
+    ramp_minutes_entry.grid(row=5, column=1, padx=10, pady=6, sticky="w")
     ramp_minutes_entry.insert(0, "30")
 
     status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
     status_label = ttk.Label(ramp_frame, textvariable=status_var)
-    status_label.grid(row=5, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+    status_label.grid(row=6, column=0, columnspan=2, padx=10, pady=8, sticky="w")
 
     update_live_status()
 
