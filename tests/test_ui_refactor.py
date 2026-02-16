@@ -26,8 +26,8 @@ except ImportError:
     sys.modules['numpy'] = MagicMock()
 
 # Load SourceCode module
-source_code = types.ModuleType("SourceCode")
-file_path = os.path.abspath("SourceCode")
+source_code = types.ModuleType("SourceCode.py")
+file_path = os.path.abspath("SourceCode.py")
 
 with open(file_path, "r") as f:
     code_content = f.read()

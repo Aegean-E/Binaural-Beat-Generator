@@ -25,14 +25,15 @@ sys.path.append(os.getcwd())
 # Helper to load the extensionless SourceCode module
 def load_source_code():
     module_name = 'SourceCode'
+    file_name = 'SourceCode.py'
     # Try current directory first
-    if os.path.exists(module_name):
-        file_path = os.path.abspath(module_name)
-    elif os.path.exists(os.path.join('..', module_name)):
-        file_path = os.path.abspath(os.path.join('..', module_name))
+    if os.path.exists(file_name):
+        file_path = os.path.abspath(file_name)
+    elif os.path.exists(os.path.join('..', file_name)):
+        file_path = os.path.abspath(os.path.join('..', file_name))
     else:
         # Fallback to absolute path search or assume it's in current dir
-        file_path = os.path.abspath(module_name)
+        file_path = os.path.abspath(file_name)
 
     loader = importlib.machinery.SourceFileLoader(module_name, file_path)
     spec = importlib.util.spec_from_loader(loader.name, loader)

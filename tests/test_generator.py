@@ -40,7 +40,7 @@ mock_np.sum.return_value = 0.0
 # Load SourceCode
 # Use importlib.util to load extensionless file
 try:
-    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode')
+    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode.py')
     spec = importlib.util.spec_from_loader(loader.name, loader)
     sc = importlib.util.module_from_spec(spec)
     sys.modules["SourceCode"] = sc
