@@ -78,7 +78,7 @@ class TestScientificVerification(unittest.TestCase):
             carrier_hz=0.0,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_minutes=0.0
+            ramp_duration_s=0.0
         )
         gen = BinauralGenerator(cfg)
         audio = gen.generate_block(44100 * 1) # 1 second
@@ -101,7 +101,7 @@ class TestScientificVerification(unittest.TestCase):
             carrier_hz=0.0,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_minutes=0.0
+            ramp_duration_s=0.0
         )
         gen = BinauralGenerator(cfg)
         audio = gen.generate_block(1000)
@@ -123,7 +123,7 @@ class TestScientificVerification(unittest.TestCase):
             carrier_hz=0.0,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_minutes=0.0
+            ramp_duration_s=0.0
         )
         gen = BinauralGenerator(cfg)
         audio = gen.generate_block(44100)
@@ -149,7 +149,7 @@ class TestScientificVerification(unittest.TestCase):
             carrier_hz=0.0,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_minutes=0.0
+            ramp_duration_s=0.0
         )
 
         errors = verification.validate_export(BinauralGenerator, cfg, 0.5) # 0.5s duration
@@ -170,7 +170,7 @@ class TestScientificVerification(unittest.TestCase):
             carrier_hz=440.0,
             start_beat_hz=10.0,
             end_beat_hz=5.0,
-            ramp_minutes=30.0
+            ramp_duration_s=30.0 * 60.0
         )
         gen = BinauralGenerator(cfg)
 

@@ -66,13 +66,14 @@ class TestBinauralGenerator(unittest.TestCase):
             carrier_hz=0.0,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_minutes=0.0
+            ramp_duration_s=0.0
         )
         # Reset mocks
         mock_np.arange.reset_mock()
         mock_np.sin.reset_mock()
         mock_np.clip.reset_mock()
         mock_np.cumsum.reset_mock()
+        mock_np.full.reset_mock()
 
     def test_initialization(self):
         gen = sc.BinauralGenerator(self.cfg)
@@ -84,29 +85,24 @@ class TestBinauralGenerator(unittest.TestCase):
         gen = sc.BinauralGenerator(self.cfg)
         frames = 1024
 
-        # Configure cumsum return value to allow slicing
-        mock_cumsum_ret = MagicMock()
-        mock_np.cumsum.return_value = mock_cumsum_ret
-        mock_cumsum_ret.__getitem__.return_value = MagicMock()
-
         # Call generate
         output = gen.generate_block(frames)
 
         # Verify sample count incremented
         self.assertEqual(gen.samples_generated, frames)
 
-        # Verify phase calculation used correct functions
-        # We expect calls to maximum, cumsum, concatenate
-        self.assertTrue(mock_np.maximum.called)
-        self.assertTrue(mock_np.cumsum.called)
-        self.assertTrue(mock_np.concatenate.called)
+        # Verify optimization: cumsum should NOT be called
+        mock_np.cumsum.assert_not_called()
+
+        # Verify arange was called (for t_vec)
+        self.assertTrue(mock_np.arange.called)
 
         # Verify clip was called (stateless limiter + fades)
         mock_np.clip.assert_called()
 
     def test_generate_block_ramp(self):
         self.cfg.use_ramp = True
-        self.cfg.ramp_minutes = 1.0
+        self.cfg.ramp_duration_s = 60.0
         self.cfg.start_beat_hz = 10.0
         self.cfg.end_beat_hz = 5.0
         self.cfg.carrier_hz = 200.0
@@ -122,6 +118,9 @@ class TestBinauralGenerator(unittest.TestCase):
 
         # Check samples
         self.assertEqual(gen.samples_generated, 44100)
+
+        # Verify cumsum WAS called (ramp logic uses it)
+        self.assertTrue(mock_np.cumsum.called)
 
         # Call again
         gen.generate_block(frames)
