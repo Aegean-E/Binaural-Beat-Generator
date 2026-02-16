@@ -26,7 +26,10 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - Generate **monaural beats** with the same frequency in both ears.
 - Choose from different **waveforms** : Sine, Square, Sawtooth.
 - Control **volume** independently for each ear.
-- **Soft limiter** to prevent clipping and harsh output
+- **Soft limiter** to prevent clipping and harsh output.
+- **High-Precision DSP**: Exact phase calculation for artifact-free ramps.
+- **Fade In/Out**: Smooth transitions to prevent clicks.
+- **Thread-Safe Audio Engine**: Reliable playback and export without UI freezing.
 - **Presets** for popular binaural beat frequencies.
 - **Looped playback** until stopped.
 - **Simple GUI** using Tkinter with labeled frames and input fields.
@@ -38,6 +41,19 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - Works as a **standalone `.exe` file** for Windows.
   
 ---
+
+## Technical Details
+
+- **Frequency Range**: 20 Hz - 20,000 Hz.
+- **Beat Frequency**: 0.1 Hz - 100 Hz.
+- **Sample Rate**: 44.1 kHz (Internal processing).
+- **DSP**:
+    - Uses 64-bit float accumulation for phase precision.
+    - Vectorized quadratic phase integration for ramp mode.
+    - Soft clipper (tanh) with stateless normalization.
+
+---
+
 ## 🧠 Presets System
 
 ### User Presets (New Function) :
