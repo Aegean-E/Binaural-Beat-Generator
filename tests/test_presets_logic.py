@@ -24,6 +24,8 @@ class TestPresetsLogic(unittest.TestCase):
             'numpy': mock_numpy,
             'scipy': mock_scipy,
             'scipy.signal': MagicMock(),
+            'scipy.io': MagicMock(),
+            'scipy.io.wavfile': MagicMock(),
             'sounddevice': MagicMock(),
             'ttkbootstrap': MagicMock(),
             'tkinter': mock_tk,

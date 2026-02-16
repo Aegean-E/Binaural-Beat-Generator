@@ -16,6 +16,8 @@ sys.modules['sounddevice'] = MagicMock()
 sys.modules['numpy'] = MagicMock()
 sys.modules['scipy'] = MagicMock()
 sys.modules['scipy.signal'] = MagicMock()
+sys.modules['scipy.io'] = MagicMock()
+sys.modules['scipy.io.wavfile'] = MagicMock()
 
 # Ensure local imports work (for presets.py)
 sys.path.append(os.getcwd())
@@ -65,61 +67,61 @@ class TestAddUserPreset(unittest.TestCase):
         # Restore original config
         source_code.config = self.original_config
 
-    @patch('SourceCode.save_config')
-    def test_add_user_preset_success_binaural(self, mock_save_config):
+    def test_add_user_preset_success_binaural(self):
         """Test adding a valid Binaural preset."""
-        source_code.add_user_preset("Binaural", "My Preset", 100.0, 110.0)
+        with patch.object(source_code, 'save_config') as mock_save_config:
+            source_code.add_user_preset("Binaural", "My Preset", 100.0, 110.0)
 
-        self.assertEqual(len(self.test_config["user_presets"]["Binaural"]), 1)
-        preset = self.test_config["user_presets"]["Binaural"][0]
-        self.assertEqual(preset["label"], "My Preset")
-        self.assertEqual(preset["left_hz"], 100.0)
-        self.assertEqual(preset["right_hz"], 110.0)
+            self.assertEqual(len(self.test_config["user_presets"]["Binaural"]), 1)
+            preset = self.test_config["user_presets"]["Binaural"][0]
+            self.assertEqual(preset["label"], "My Preset")
+            self.assertEqual(preset["left_hz"], 100.0)
+            self.assertEqual(preset["right_hz"], 110.0)
 
-        mock_save_config.assert_called_once_with(self.test_config)
+            mock_save_config.assert_called_once_with(self.test_config)
 
-    @patch('SourceCode.save_config')
-    def test_add_user_preset_success_monaural(self, mock_save_config):
+    def test_add_user_preset_success_monaural(self):
         """Test adding a valid Monaural preset."""
-        source_code.add_user_preset("Monaural", "Mono Preset", 432.0, 432.0)
+        with patch.object(source_code, 'save_config') as mock_save_config:
+            source_code.add_user_preset("Monaural", "Mono Preset", 432.0, 432.0)
 
-        self.assertEqual(len(self.test_config["user_presets"]["Monaural"]), 1)
-        preset = self.test_config["user_presets"]["Monaural"][0]
-        self.assertEqual(preset["label"], "Mono Preset")
-        self.assertEqual(preset["left_hz"], 432.0)
-        self.assertEqual(preset["right_hz"], 432.0)
+            self.assertEqual(len(self.test_config["user_presets"]["Monaural"]), 1)
+            preset = self.test_config["user_presets"]["Monaural"][0]
+            self.assertEqual(preset["label"], "Mono Preset")
+            self.assertEqual(preset["left_hz"], 432.0)
+            self.assertEqual(preset["right_hz"], 432.0)
 
-        mock_save_config.assert_called_once_with(self.test_config)
+            mock_save_config.assert_called_once_with(self.test_config)
 
-    @patch('SourceCode.save_config')
-    def test_add_user_preset_category_normalization(self, mock_save_config):
+    def test_add_user_preset_category_normalization(self):
         """Test that category string is normalized (case insensitive, stripped)."""
-        # " binaural " -> "Binaural"
-        source_code.add_user_preset(" binaural ", "Preset 1", 100, 110)
-        self.assertEqual(len(self.test_config["user_presets"]["Binaural"]), 1)
+        with patch.object(source_code, 'save_config') as mock_save_config:
+            # " binaural " -> "Binaural"
+            source_code.add_user_preset(" binaural ", "Preset 1", 100, 110)
+            self.assertEqual(len(self.test_config["user_presets"]["Binaural"]), 1)
 
-        # "MONAURAL" -> "Monaural"
-        source_code.add_user_preset("MONAURAL", "Preset 2", 200, 200)
-        self.assertEqual(len(self.test_config["user_presets"]["Monaural"]), 1)
+            # "MONAURAL" -> "Monaural"
+            source_code.add_user_preset("MONAURAL", "Preset 2", 200, 200)
+            self.assertEqual(len(self.test_config["user_presets"]["Monaural"]), 1)
 
-    @patch('SourceCode.save_config')
-    def test_add_user_preset_label_strip(self, mock_save_config):
+    def test_add_user_preset_label_strip(self):
         """Test that label is stripped of leading/trailing whitespace."""
-        source_code.add_user_preset("Binaural", "  Spaced Label  ", 100, 110)
+        with patch.object(source_code, 'save_config') as mock_save_config:
+            source_code.add_user_preset("Binaural", "  Spaced Label  ", 100, 110)
 
-        preset = self.test_config["user_presets"]["Binaural"][0]
-        self.assertEqual(preset["label"], "Spaced Label")
+            preset = self.test_config["user_presets"]["Binaural"][0]
+            self.assertEqual(preset["label"], "Spaced Label")
 
-    @patch('SourceCode.save_config')
-    def test_add_user_preset_string_frequency(self, mock_save_config):
+    def test_add_user_preset_string_frequency(self):
         """Test that string frequencies are converted to float."""
-        source_code.add_user_preset("Binaural", "String Freq", "100.5", "110.5")
+        with patch.object(source_code, 'save_config') as mock_save_config:
+            source_code.add_user_preset("Binaural", "String Freq", "100.5", "110.5")
 
-        preset = self.test_config["user_presets"]["Binaural"][0]
-        self.assertIsInstance(preset["left_hz"], float)
-        self.assertIsInstance(preset["right_hz"], float)
-        self.assertEqual(preset["left_hz"], 100.5)
-        self.assertEqual(preset["right_hz"], 110.5)
+            preset = self.test_config["user_presets"]["Binaural"][0]
+            self.assertIsInstance(preset["left_hz"], float)
+            self.assertIsInstance(preset["right_hz"], float)
+            self.assertEqual(preset["left_hz"], 100.5)
+            self.assertEqual(preset["right_hz"], 110.5)
 
     def test_add_user_preset_invalid_category(self):
         """Test that invalid category raises ValueError."""

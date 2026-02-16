@@ -16,6 +16,8 @@ sys.modules['ttkbootstrap'] = MagicMock()
 sys.modules['sounddevice'] = MagicMock()
 sys.modules['scipy'] = MagicMock()
 sys.modules['scipy.signal'] = MagicMock()
+sys.modules['scipy.io'] = MagicMock()
+sys.modules['scipy.io.wavfile'] = MagicMock()
 
 # Mock numpy if needed
 try:
