@@ -7,15 +7,14 @@ import json
 from pathlib import Path
 from tkinter import filedialog
 import logging
+import threading
+from dataclasses import dataclass
+import functools
 
 import numpy as np
 import sounddevice as sd
 from scipy import signal
 from scipy.io import wavfile
-import functools
-from dataclasses import dataclass
-import threading
-
 import ttkbootstrap as tb
 
 import presets
@@ -23,15 +22,14 @@ import presets
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Aegean
-
-is_playing = False
-stream = None
+# =============================================================================
+# Global Application State
+# =============================================================================
 
 live_status_after_id = None
-
 play_mode = "manual"  # "manual" or "ramp"
-play_start_time = 0.0
+
+# Defaults
 ramp_carrier_hz = 432.0
 ramp_start_beat_hz = 20.0
 ramp_end_beat_hz = 3.0
@@ -39,15 +37,18 @@ ramp_duration_s = 30.0 * 60.0
 manual_left_hz = 432.0
 manual_right_hz = 432.0
 
+APP_DIR = Path.home() / ".binaural_beat_generator"
+CONFIG_PATH = APP_DIR / "config.json"
+
 waveforms = {
     "Sine": np.sin,
     "Square": signal.square,
     "Sawtooth": signal.sawtooth,
 }
 
-APP_DIR = Path.home() / ".binaural_beat_generator"
-CONFIG_PATH = APP_DIR / "config.json"
-
+# =============================================================================
+# Configuration & Persistence
+# =============================================================================
 
 def load_config() -> dict:
     try:
@@ -57,7 +58,6 @@ def load_config() -> dict:
         logger.error(f"Error loading config from {CONFIG_PATH}", exc_info=True)
     return {}
 
-
 def save_config(cfg: dict) -> None:
     try:
         APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,10 +65,8 @@ def save_config(cfg: dict) -> None:
     except Exception:
         logger.error(f"Error saving config to {CONFIG_PATH}", exc_info=True)
 
-
 config = load_config()
 initial_theme = config.get("theme", "darkly")
-
 
 def _normalize_category(category: str) -> str:
     c = str(category).strip().lower()
@@ -78,7 +76,6 @@ def _normalize_category(category: str) -> str:
         return "Monaural"
     raise ValueError("Category must be 'Monaural' or 'Binaural'")
 
-
 def get_user_presets() -> dict:
     up = config.get("user_presets", {})
     return {
@@ -86,10 +83,8 @@ def get_user_presets() -> dict:
         "Binaural": list(up.get("Binaural", [])),
     }
 
-
 def add_user_preset(category: str, label: str, left_hz: float, right_hz: float) -> None:
     category = _normalize_category(category)
-
     try:
         preset_obj = {
             "label": str(label).strip(),
@@ -103,26 +98,20 @@ def add_user_preset(category: str, label: str, left_hz: float, right_hz: float) 
 
     up = get_user_presets()
     up[category].append(preset_obj)
-
     config["user_presets"] = up
     save_config(config)
 
-
 def remove_user_preset(category: str, label: str) -> bool:
     category = _normalize_category(category)
-
     up = get_user_presets()
     label = str(label).strip()
-
     for i, p in enumerate(up[category]):
         if str(p.get("label", "")).strip() == label:
             up[category].pop(i)
             config["user_presets"] = up
             save_config(config)
             return True
-
     return False
-
 
 def get_all_presets() -> dict:
     up = get_user_presets()
@@ -131,17 +120,31 @@ def get_all_presets() -> dict:
         "Binaural": list(presets.BINAURAL_PRESETS) + up["Binaural"],
     }
 
+# =============================================================================
+# Audio Engine & DSP
+# =============================================================================
 
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
 
+def validate_audio_params(freq_l, freq_r, vol_l, vol_r, duration=None):
+    if not (20.0 <= freq_l <= 20000.0):
+        return "Frequency must be between 20 Hz and 20000 Hz."
+    if not (20.0 <= freq_r <= 20000.0):
+        return "Frequency must be between 20 Hz and 20000 Hz."
+    if not (0.0 <= vol_l <= 100.0):
+        return "Volume must be between 0% and 100%."
+    if not (0.0 <= vol_r <= 100.0):
+        return "Volume must be between 0% and 100%."
+    if duration is not None and duration <= 0:
+        return "Duration must be positive."
+    return None
 
 def _compute_ramped_beat_hz(elapsed_s: float, start_beat_hz: float, end_beat_hz: float, ramp_s: float) -> float:
     if ramp_s <= 0:
         return end_beat_hz
     x = clamp(elapsed_s / ramp_s, 0.0, 1.0)
     return start_beat_hz + (end_beat_hz - start_beat_hz) * x
-
 
 @dataclass
 class AudioConfig:
@@ -158,7 +161,6 @@ class AudioConfig:
     end_beat_hz: float
     ramp_minutes: float
 
-
 class BinauralGenerator:
     def __init__(self, cfg: AudioConfig):
         self.cfg = cfg
@@ -166,40 +168,84 @@ class BinauralGenerator:
         self.phase_r = 0.0
         self.samples_generated = 0
         self.ramp_s = max(0.0, float(cfg.ramp_minutes) * 60.0)
-        self.left_wave_func = waveforms[cfg.left_waveform]
-        self.right_wave_func = waveforms[cfg.right_waveform]
+
+        # Resolve waveform functions
+        # Default to Sine if not found to prevent crashes
+        self.left_wave_func = waveforms.get(cfg.left_waveform, np.sin)
+        self.right_wave_func = waveforms.get(cfg.right_waveform, np.sin)
+
         self.drive = 2.5
         self.tanh_drive = np.tanh(self.drive)
 
-    def generate_block(self, frames: int) -> np.ndarray:
-        # Time array for this block
-        t = np.arange(frames, dtype=np.float32) / self.cfg.sample_rate
+        # Fade configuration
+        self.fade_in_len = int(0.02 * cfg.sample_rate) # 20 ms
+        self.fade_out_len = int(0.02 * cfg.sample_rate) # 20 ms
+        self.stopping = False
+        self.fade_out_counter = 0
+        self.is_finished = False
 
-        # Calculate current time in seconds based on samples generated
+    def request_stop(self):
+        """Signal the generator to start fading out."""
+        self.stopping = True
+
+    def generate_block(self, frames: int) -> np.ndarray:
+        # Time array for this block (seconds relative to start of stream)
+        # Using float64 for time accumulation to prevent jitter over long sessions, though inputs are float
         current_time = self.samples_generated / self.cfg.sample_rate
 
+        # Calculate frequencies per sample
         if self.cfg.use_ramp:
-            beat_hz = _compute_ramped_beat_hz(current_time, self.cfg.start_beat_hz, self.cfg.end_beat_hz, self.ramp_s)
-            lf = self.cfg.carrier_hz - (beat_hz / 2.0)
-            rf = self.cfg.carrier_hz + (beat_hz / 2.0)
+            # Vectorized ramp calculation
+            # Create global time array for this block
+            t_global = current_time + np.arange(frames, dtype=np.float64) / self.cfg.sample_rate
+
+            if self.ramp_s <= 0:
+                 beat_hz = np.full(frames, self.cfg.end_beat_hz, dtype=np.float64)
+            else:
+                 # Linear interpolation with clamping
+                 progress = np.clip(t_global / self.ramp_s, 0.0, 1.0)
+                 beat_hz = self.cfg.start_beat_hz + (self.cfg.end_beat_hz - self.cfg.start_beat_hz) * progress
+
+            lf_array = self.cfg.carrier_hz - (beat_hz / 2.0)
+            rf_array = self.cfg.carrier_hz + (beat_hz / 2.0)
         else:
-            lf = self.cfg.left_frequency
-            rf = self.cfg.right_frequency
+            # Constant frequency
+            lf_array = np.full(frames, self.cfg.left_frequency, dtype=np.float64)
+            rf_array = np.full(frames, self.cfg.right_frequency, dtype=np.float64)
 
-        lf = max(0.0, float(lf))
-        rf = max(0.0, float(rf))
+        # Enforce positive frequency
+        lf_array = np.maximum(0.0, lf_array)
+        rf_array = np.maximum(0.0, rf_array)
 
-        wl = np.float32(2.0 * np.pi * lf)
-        wr = np.float32(2.0 * np.pi * rf)
+        # Calculate phase increments: 2 * pi * f / sr
+        inc_l = (2.0 * np.pi * lf_array / self.cfg.sample_rate)
+        inc_r = (2.0 * np.pi * rf_array / self.cfg.sample_rate)
 
-        # Calculate phase vectors starting from current phase
-        phase_vec_l = np.float32(self.phase_l) + wl * t
-        phase_vec_r = np.float32(self.phase_r) + wr * t
+        # Calculate cumulative phase shift
+        # We start at self.phase_l. Sample 0 is at self.phase_l.
+        # Sample n is at self.phase_l + sum(inc[0]...inc[n-1])
+        # np.cumsum returns [inc0, inc0+inc1, ...]. We shift it.
 
-        # Update accumulated phase for next block
-        block_duration = frames / self.cfg.sample_rate
-        self.phase_l = (self.phase_l + wl * block_duration) % (2.0 * np.pi)
-        self.phase_r = (self.phase_r + wr * block_duration) % (2.0 * np.pi)
+        phase_shift_l = np.concatenate(([0.0], np.cumsum(inc_l)[:-1]))
+        phase_shift_r = np.concatenate(([0.0], np.cumsum(inc_r)[:-1]))
+
+        phase_vec_l = self.phase_l + phase_shift_l
+        phase_vec_r = self.phase_r + phase_shift_r
+
+        # Calculate next block seed phase
+        # Total change over this block is sum of all increments
+        self.phase_l = (self.phase_l + np.sum(inc_l)) % (2.0 * np.pi)
+        self.phase_r = (self.phase_r + np.sum(inc_r)) % (2.0 * np.pi)
+
+        # Generate Waveforms
+        # Cast phase to float32 if needed by wave funcs, but numpy handles float64 fine.
+        # However, large phase values in float32 lose precision.
+        # Since we just added phase_shift, phase_vec can be large.
+        # But we only care about phase mod 2pi for sin.
+        # If we use np.sin, it handles large values but precision degrades.
+        # It's better to wrap phase_vec if it gets huge, but here we reset self.phase_l every block.
+        # Within a block, phase_shift is small (max ~600 for 100ms block).
+        # So precision is fine.
 
         left = self.cfg.left_volume * self.left_wave_func(phase_vec_l)
         right = self.cfg.right_volume * self.right_wave_func(phase_vec_r)
@@ -207,60 +253,217 @@ class BinauralGenerator:
         stereo = np.column_stack((left, right))
 
         # Stateless soft limiter/saturator
-        # Preserves the saturation character of the original but avoids per-block pumping.
         stereo = np.tanh(stereo * self.drive) / self.tanh_drive
         stereo = np.clip(stereo, -1.0, 1.0)
+
+        # Apply Fade In
+        start_idx = self.samples_generated
+        end_idx = start_idx + frames
+
+        if start_idx < self.fade_in_len:
+            # Generate ramp for fade in
+            ramp_in = np.arange(start_idx, end_idx, dtype=np.float32) / self.fade_in_len
+            ramp_in = np.clip(ramp_in, 0.0, 1.0)
+            stereo *= ramp_in[:, np.newaxis]
+
+        # Apply Fade Out if stopping
+        if self.stopping:
+            # Calculate remaining fade out samples
+            remaining = self.fade_out_len - self.fade_out_counter
+
+            if remaining <= 0:
+                stereo.fill(0)
+                self.is_finished = True
+                self.samples_generated += frames
+                return stereo
+
+            # Generate fade out ramp
+            # ramp goes from 1.0 down to 0.0 over fade_out_len
+            # t relative to start of fade out
+            t_fade = np.arange(self.fade_out_counter, self.fade_out_counter + frames, dtype=np.float32)
+            ramp_out = 1.0 - (t_fade / self.fade_out_len)
+            ramp_out = np.clip(ramp_out, 0.0, 1.0)
+
+            stereo *= ramp_out[:, np.newaxis]
+
+            self.fade_out_counter += frames
+
+            if self.fade_out_counter >= self.fade_out_len:
+                self.is_finished = True
+                # Ensure silence after fade
+                cutoff = int(remaining)
+                if cutoff < frames:
+                    stereo[cutoff:] = 0
 
         self.samples_generated += frames
         return stereo.astype(np.float32, copy=False)
 
+class AudioEngine:
+    def __init__(self):
+        self._stream = None
+        self.generator = None
+        self._lock = threading.Lock()
+        self.is_playing = False
+        self.start_time = 0.0
+        self.current_config = None
 
-def _start_stream(cfg: AudioConfig):
-    global stream
+    def start(self, cfg: AudioConfig):
+        # Stop existing stream safely (but don't reset UI state yet)
+        self.stop()
+
+        with self._lock:
+            try:
+                self.generator = BinauralGenerator(cfg)
+                self.current_config = cfg
+
+                def callback(outdata, frames, time, status):
+                    if status:
+                        logger.warning(f"Audio status: {status}")
+                    try:
+                        # Generate audio
+                        data = self.generator.generate_block(frames)
+                        outdata[:] = data
+
+                        # Check if finished (fade out complete)
+                        if self.generator.is_finished:
+                            raise sd.CallbackStop
+
+                    except Exception as e:
+                        if not isinstance(e, sd.CallbackStop):
+                            logger.error("Audio callback error", exc_info=True)
+                        # Silence on error
+                        outdata.fill(0)
+                        # Don't abort immediately on glitch, but maybe log
+                        # If critical, raise sd.CallbackAbort
+
+                self._stream = sd.OutputStream(
+                    samplerate=cfg.sample_rate,
+                    channels=2,
+                    callback=callback,
+                    dtype="float32"
+                )
+                self._stream.start()
+                self.is_playing = True
+                self.start_time = time.time()
+                logger.info("Audio started")
+            except Exception as e:
+                logger.error("Failed to start audio", exc_info=True)
+                self.is_playing = False
+                if self._stream:
+                    try:
+                        self._stream.close()
+                    except Exception: pass
+                    self._stream = None
+                raise e
+
+    def stop(self):
+        """Stops audio gracefully with fade out."""
+        # 1. Signal stop
+        with self._lock:
+            if not self.is_playing:
+                return
+
+            if self.generator:
+                self.generator.request_stop()
+
+        # 2. Wait for stream to finish (fade out)
+        # We wait up to 200ms
+        for _ in range(20):
+             with self._lock:
+                 if self.generator and self.generator.is_finished:
+                     break
+                 # Also check if stream is inactive?
+                 # stream.active might be true until callback returns Stop
+             time.sleep(0.01)
+
+        # 3. Force stop
+        with self._lock:
+            if self._stream:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    logger.error("Error closing stream", exc_info=True)
+                self._stream = None
+            self.is_playing = False
+            self.generator = None
+            logger.info("Audio stopped")
+
+    def get_elapsed_time(self):
+        if self.is_playing:
+            return time.time() - self.start_time
+        return 0.0
+
+audio_engine = AudioEngine()
+
+def stop_audio():
+    global live_status_after_id
+    global play_mode
+
+    # Stop UI update loop
+    if live_status_after_id is not None:
+        try:
+            root.after_cancel(live_status_after_id)
+        except Exception:
+            logger.error("Error cancelling live status update", exc_info=True)
+        live_status_after_id = None
 
     try:
-        if stream is not None:
-            stop_audio()
+        audio_engine.stop()
+    except Exception as e:
+        logger.error(f"Error stopping audio: {e}", exc_info=True)
+
+    play_mode = "manual"
+
+# =============================================================================
+# UI & Interaction
+# =============================================================================
+
+def _run_export_thread(cfg, filename, duration, progress_win, progress_bar, progress_label, on_success, on_error):
+    try:
+        sample_rate = cfg.sample_rate
+        total_frames = int(duration * sample_rate)
+        block_size = 4096
 
         generator = BinauralGenerator(cfg)
 
-        def callback(outdata, frames, _time_info, status):
-            if status:
-                logger.warning(f"Audio status: {status}")
-            try:
-                outdata[:] = generator.generate_block(frames)
-            except Exception:
-                logger.error("Error in audio callback", exc_info=True)
-                # Output silence in case of error to prevent garbage
-                outdata.fill(0)
+        frames_written = 0
+        all_audio = []
 
-        stream = sd.OutputStream(
-            samplerate=cfg.sample_rate,
-            channels=2,
-            dtype="float32",
-            callback=callback,
-            blocksize=0
-        )
-        stream.start()
-        logger.info("Audio stream started")
-    except Exception:
-        logger.error("Failed to start audio stream", exc_info=True)
-        messagebox.showerror("Audio Error", "Failed to start audio stream. See logs for details.")
+        while frames_written < total_frames:
+            # Check for window close (cancellation) via event or shared flag?
+            # For simplicity, we just check if window exists via main thread callback
 
+            chunk_size = min(block_size, total_frames - frames_written)
+            audio_block = generator.generate_block(chunk_size)
+            all_audio.append(audio_block)
+            frames_written += chunk_size
 
-def validate_audio_params(freq_l, freq_r, vol_l, vol_r, duration=None):
-    if not (1.0 <= freq_l <= 1000.0):
-        return "Frequency must be between 1 Hz and 1000 Hz."
-    if not (1.0 <= freq_r <= 1000.0):
-        return "Frequency must be between 1 Hz and 1000 Hz."
-    if not (0.0 <= vol_l <= 100.0):
-        return "Volume must be between 0% and 100%."
-    if not (0.0 <= vol_r <= 100.0):
-        return "Volume must be between 0% and 100%."
-    if duration is not None and duration <= 0:
-        return "Duration must be positive."
-    return None
+            percent = (frames_written / total_frames) * 100
 
+            def update_ui(p=percent):
+                try:
+                    if progress_win.winfo_exists():
+                        progress_bar['value'] = p
+                        progress_label.config(text=f"Generating... {int(p)}%")
+                except Exception: pass
+
+            root.after(0, update_ui)
+
+        full_audio = np.concatenate(all_audio)
+
+        # Apply fade out to the very end (last 20ms) for clean cut
+        fade_len = int(0.02 * sample_rate)
+        if len(full_audio) > fade_len:
+            ramp = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+            full_audio[-fade_len:] *= ramp[:, np.newaxis]
+
+        wavfile.write(filename, sample_rate, full_audio)
+
+        root.after(0, lambda: on_success(filename))
+
+    except Exception as e:
+        root.after(0, lambda: on_error(e))
 
 def export_audio_file():
     stop_audio()
@@ -296,8 +499,14 @@ def export_audio_file():
             ramp_duration_s = max(0.0, ramp_minutes * 60.0)
 
             # Basic validation for ramp
-            if not (1.0 <= ramp_carrier_hz <= 1000.0):
-                 messagebox.showerror("Input Error", "Carrier frequency must be between 1 Hz and 1000 Hz.")
+            if not (20.0 <= ramp_carrier_hz <= 20000.0):
+                 messagebox.showerror("Input Error", "Carrier frequency must be between 20 Hz and 20000 Hz.")
+                 return
+            if not (0.1 <= ramp_start_beat_hz <= 100.0):
+                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
+                 return
+            if not (0.1 <= ramp_end_beat_hz <= 100.0):
+                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
                  return
 
             cfg = AudioConfig(
@@ -369,59 +578,48 @@ def export_audio_file():
         progress_win.title("Exporting...")
         progress_win.geometry("300x100")
 
+        # Make modal?
+        # progress_win.transient(root)
+        # progress_win.grab_set()
+
         progress_label = ttk.Label(progress_win, text="Generating audio...")
         progress_label.pack(pady=10)
         progress_bar = ttk.Progressbar(progress_win, mode='determinate')
         progress_bar.pack(fill=tk.X, padx=20, pady=10)
 
-        root.update()
+        def on_success(fname):
+            try:
+                if progress_win.winfo_exists():
+                    progress_win.destroy()
+                logger.info(f"Exported audio to {fname}")
+                messagebox.showinfo("Export Complete", f"Saved to {fname}")
+            except Exception: pass
 
-        generator = BinauralGenerator(cfg)
-        total_frames = int(duration * sample_rate)
-        block_size = 4096
+        def on_error(e):
+            try:
+                if progress_win.winfo_exists():
+                    progress_win.destroy()
+                logger.error("Export failed", exc_info=True)
+                messagebox.showerror("Export Error", f"Export failed: {str(e)}")
+            except Exception: pass
 
-        frames_written = 0
-        all_audio = []
-
-        try:
-            while frames_written < total_frames:
-                chunk_size = min(block_size, total_frames - frames_written)
-                audio_block = generator.generate_block(chunk_size)
-                all_audio.append(audio_block)
-                frames_written += chunk_size
-
-                # Update progress
-                percent = (frames_written / total_frames) * 100
-                progress_bar['value'] = percent
-                progress_win.update()
-
-            full_audio = np.concatenate(all_audio)
-
-            wavfile.write(filename, sample_rate, full_audio)
-
-            logger.info(f"Exported audio to {filename}")
-            messagebox.showinfo("Export Complete", f"Saved to {filename}")
-        except Exception as e:
-            logger.error("Export failed", exc_info=True)
-            messagebox.showerror("Export Error", f"Export failed: {str(e)}")
-        finally:
-            progress_win.destroy()
+        t = threading.Thread(target=_run_export_thread, args=(cfg, filename, duration, progress_win, progress_bar, progress_label, on_success, on_error))
+        t.start()
 
     except Exception as e:
         logger.error("Export initialization failed", exc_info=True)
         messagebox.showerror("Export Error", str(e))
 
-
 def play_audio():
-    global is_playing
-    global play_mode, play_start_time
+    global play_mode
     global ramp_carrier_hz, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s
     global manual_left_hz, manual_right_hz
     global live_status_after_id
 
     try:
-        if is_playing:
-            stop_audio()
+        # Don't call stop_audio() blindly, engine.start() handles restart safely.
+        # But we want to update UI state, so maybe stopping is good?
+        # Let's trust engine.start() to swap streams.
 
         sample_rate = 44100
 
@@ -439,7 +637,6 @@ def play_audio():
         right_waveform = right_waveform_var.get()
 
         use_ramp = bool(ramp_enabled_var.get())
-        play_start_time = time.time()
 
         if use_ramp:
             play_mode = "ramp"
@@ -453,8 +650,14 @@ def play_audio():
                 messagebox.showerror("Input Error", "Please enter valid numeric values for ramp settings.")
                 return
 
-            if not (1.0 <= ramp_carrier_hz <= 1000.0):
-                 messagebox.showerror("Input Error", "Carrier frequency must be between 1 Hz and 1000 Hz.")
+            if not (20.0 <= ramp_carrier_hz <= 20000.0):
+                 messagebox.showerror("Input Error", "Carrier frequency must be between 20 Hz and 20000 Hz.")
+                 return
+            if not (0.1 <= ramp_start_beat_hz <= 100.0):
+                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
+                 return
+            if not (0.1 <= ramp_end_beat_hz <= 100.0):
+                 messagebox.showerror("Input Error", "Beat frequency must be between 0.1 Hz and 100 Hz.")
                  return
 
             ramp_duration_s = max(0.0, ramp_minutes * 60.0)
@@ -479,7 +682,6 @@ def play_audio():
                 end_beat_hz=ramp_end_beat_hz,
                 ramp_minutes=(ramp_duration_s / 60.0)
             )
-            _start_stream(cfg)
         else:
             play_mode = "manual"
 
@@ -509,45 +711,14 @@ def play_audio():
                 end_beat_hz=0.0,
                 ramp_minutes=0.0
             )
-            _start_stream(cfg)
 
-        is_playing = True
+        audio_engine.start(cfg)
 
         if live_status_after_id is None:
             update_live_status()
     except Exception as e:
         logger.error("Error playing audio", exc_info=True)
         messagebox.showerror("Error", f"An unexpected error occurred: {e}")
-
-
-def stop_audio():
-    global is_playing, stream
-    global play_mode
-    global live_status_after_id
-
-    # Stop UI update loop
-    if live_status_after_id is not None:
-        try:
-            root.after_cancel(live_status_after_id)
-        except Exception:
-            logger.error("Error cancelling live status update", exc_info=True)
-        live_status_after_id = None
-
-    if stream is not None:
-        try:
-            stream.stop()
-        except Exception:
-            logger.error("Error stopping audio stream", exc_info=True)
-        try:
-            stream.close()
-        except Exception:
-            logger.error("Error closing audio stream", exc_info=True)
-        stream = None
-        logger.info("Audio stopped")
-
-    is_playing = False
-    play_mode = "manual"
-
 
 def show_about():
     about_text = """
@@ -563,7 +734,6 @@ Patreon: patreon.com/Aegean_E
     """
     messagebox.showinfo("About", about_text)
 
-
 def set_theme(theme_name: str):
     try:
         root.style.theme_use(theme_name)
@@ -571,7 +741,6 @@ def set_theme(theme_name: str):
         save_config(config)
     except Exception as e:
         messagebox.showerror("Theme Error", str(e))
-
 
 def export_config_json():
     """Export the current in-memory config dict to a JSON file the user selects."""
@@ -589,7 +758,6 @@ def export_config_json():
         messagebox.showinfo("Export", f"Exported configuration to:\n{out_path}")
     except Exception as e:
         messagebox.showerror("Export Error", str(e))
-
 
 def import_config_json():
     """Import config from a JSON file, persist it, and refresh UI (theme + presets)."""
@@ -657,13 +825,11 @@ def import_config_json():
         logger.error("Error importing config", exc_info=True)
         messagebox.showerror("Import Error", str(e))
 
-
 def apply_preset(left_hz: float, right_hz: float):
     left_frequency_entry.delete(0, tk.END)
     right_frequency_entry.delete(0, tk.END)
     left_frequency_entry.insert(0, str(left_hz))
     right_frequency_entry.insert(0, str(right_hz))
-
 
 def build_preset_buttons():
     allp = get_all_presets()
@@ -683,7 +849,6 @@ def build_preset_buttons():
                 command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
             )
             btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
-
 
 def save_current_as_preset():
     try:
@@ -715,7 +880,6 @@ def save_current_as_preset():
         logger.error("Error saving preset", exc_info=True)
         messagebox.showerror("Preset Error", str(e))
 
-
 def delete_preset():
     try:
         category = preset_category_var.get().strip()
@@ -733,7 +897,6 @@ def delete_preset():
     except Exception as e:
         messagebox.showerror("Remove Preset Error", str(e))
 
-
 def update_live_status():
     global live_status_after_id
 
@@ -746,8 +909,8 @@ def update_live_status():
         live_status_after_id = None
         return
 
-    if is_playing:
-        elapsed = time.time() - play_start_time
+    if audio_engine.is_playing:
+        elapsed = audio_engine.get_elapsed_time()
 
         if play_mode == "ramp":
             beat = _compute_ramped_beat_hz(elapsed, ramp_start_beat_hz, ramp_end_beat_hz, ramp_duration_s)
@@ -769,7 +932,6 @@ def update_live_status():
 
     live_status_after_id = root.after(200, update_live_status)
 
-
 def on_close():
     try:
         stop_audio()
@@ -778,7 +940,6 @@ def on_close():
             root.destroy()
         except Exception:
             logger.error("Error closing application", exc_info=True)
-
 
 def create_frequency_control_frame(parent, title, column, waveform_options, default_freq="432", default_vol="50", default_waveform="Sine"):
     frame = ttk.LabelFrame(parent, text=title)
@@ -805,7 +966,6 @@ def create_frequency_control_frame(parent, title, column, waveform_options, defa
     waveform_combobox.set(default_waveform)
 
     return freq_entry, vol_entry, waveform_var, waveform_combobox
-
 
 if __name__ == "__main__":
     root = tb.Window(themename=initial_theme)

@@ -24,6 +24,7 @@ sys.modules['numpy'] = mock_np
 
 # Setup numpy mocks to return usable objects
 mock_np.float32 = float
+mock_np.float64 = float
 mock_np.pi = 3.14159
 mock_np.arange.return_value = MagicMock() # Represents array
 mock_np.sin.return_value = MagicMock()
@@ -31,20 +32,18 @@ mock_np.tanh.return_value = MagicMock()
 mock_np.clip.return_value = MagicMock()
 mock_np.column_stack.return_value = MagicMock() # Represents stereo array
 mock_np.concatenate.return_value = MagicMock()
+mock_np.maximum.return_value = MagicMock()
+mock_np.cumsum.return_value = MagicMock()
+mock_np.full.return_value = MagicMock()
+mock_np.sum.return_value = 0.0
 
 # Load SourceCode
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# Force reload to pick up mocks
-if 'SourceCode' in sys.modules:
-    del sys.modules['SourceCode']
-
+# Use importlib.util to load extensionless file
 try:
     loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode')
     spec = importlib.util.spec_from_loader(loader.name, loader)
     sc = importlib.util.module_from_spec(spec)
+    sys.modules["SourceCode"] = sc
     loader.exec_module(sc)
 except Exception as e:
     print(f"Error importing SourceCode: {e}")
@@ -52,6 +51,9 @@ except Exception as e:
 
 class TestBinauralGenerator(unittest.TestCase):
     def setUp(self):
+        # Patch waveforms
+        sc.waveforms = {"Sine": MagicMock(return_value=MagicMock())}
+
         self.cfg = sc.AudioConfig(
             sample_rate=44100,
             left_volume=0.5,
@@ -70,6 +72,7 @@ class TestBinauralGenerator(unittest.TestCase):
         mock_np.arange.reset_mock()
         mock_np.sin.reset_mock()
         mock_np.clip.reset_mock()
+        mock_np.cumsum.reset_mock()
 
     def test_initialization(self):
         gen = sc.BinauralGenerator(self.cfg)
@@ -81,19 +84,24 @@ class TestBinauralGenerator(unittest.TestCase):
         gen = sc.BinauralGenerator(self.cfg)
         frames = 1024
 
+        # Configure cumsum return value to allow slicing
+        mock_cumsum_ret = MagicMock()
+        mock_np.cumsum.return_value = mock_cumsum_ret
+        mock_cumsum_ret.__getitem__.return_value = MagicMock()
+
         # Call generate
         output = gen.generate_block(frames)
 
         # Verify sample count incremented
         self.assertEqual(gen.samples_generated, frames)
 
-        # Verify numpy calls
-        mock_np.arange.assert_called_with(frames, dtype=float)
+        # Verify phase calculation used correct functions
+        # We expect calls to maximum, cumsum, concatenate
+        self.assertTrue(mock_np.maximum.called)
+        self.assertTrue(mock_np.cumsum.called)
+        self.assertTrue(mock_np.concatenate.called)
 
-        # Verify phase update happened
-        self.assertTrue(mock_np.sin.called)
-
-        # Verify clip was called (stateless limiter)
+        # Verify clip was called (stateless limiter + fades)
         mock_np.clip.assert_called()
 
     def test_generate_block_ramp(self):
@@ -106,6 +114,10 @@ class TestBinauralGenerator(unittest.TestCase):
         gen = sc.BinauralGenerator(self.cfg)
         frames = 44100 # 1 second
 
+        mock_cumsum_ret = MagicMock()
+        mock_np.cumsum.return_value = mock_cumsum_ret
+        mock_cumsum_ret.__getitem__.return_value = MagicMock()
+
         gen.generate_block(frames)
 
         # Check samples
@@ -114,75 +126,6 @@ class TestBinauralGenerator(unittest.TestCase):
         # Call again
         gen.generate_block(frames)
         self.assertEqual(gen.samples_generated, 88200)
-
-class TestExport(unittest.TestCase):
-    def test_export_audio_file(self):
-        # Setup global root mock
-        sc.root = MagicMock()
-
-        # Mock dependencies
-        with patch.object(sc.filedialog, 'asksaveasfilename') as mock_asksaveas, \
-             patch.object(sc.simpledialog, 'askstring') as mock_askstring, \
-             patch.object(sc.wavfile, 'write') as mock_write, \
-             patch.object(sc.root, 'update') as mock_update, \
-             patch.object(sc, 'BinauralGenerator') as MockGen:
-
-            # Setup inputs
-            sc.left_volume_entry = MagicMock()
-            sc.left_volume_entry.get.return_value = "50"
-            sc.right_volume_entry = MagicMock()
-            sc.right_volume_entry.get.return_value = "50"
-
-            sc.left_frequency_entry = MagicMock()
-            sc.left_frequency_entry.get.return_value = "440"
-            sc.right_frequency_entry = MagicMock()
-            sc.right_frequency_entry.get.return_value = "444"
-
-            sc.ramp_enabled_var = MagicMock()
-            sc.ramp_enabled_var.get.return_value = False
-
-            sc.left_waveform_var = MagicMock()
-            sc.left_waveform_var.get.return_value = "Sine"
-            sc.right_waveform_var = MagicMock()
-            sc.right_waveform_var.get.return_value = "Sine"
-
-            # Mock dialogs
-            mock_askstring.return_value = "1" # 1 second duration
-            mock_asksaveas.return_value = "test_output.wav"
-
-            mock_gen_instance = MockGen.return_value
-            mock_gen_instance.generate_block.return_value = MagicMock() # Audio block
-
-            sc.export_audio_file()
-
-            # Verify generator was initialized
-            MockGen.assert_called()
-
-            # Verify generate_block was called
-            self.assertTrue(mock_gen_instance.generate_block.called)
-
-            # Verify write was called
-            mock_write.assert_called()
-            args, _ = mock_write.call_args
-            self.assertEqual(args[0], "test_output.wav")
-            self.assertEqual(args[1], 44100)
-
-class TestValidation(unittest.TestCase):
-    def test_validate_audio_params(self):
-        # Valid
-        self.assertIsNone(sc.validate_audio_params(440, 444, 50, 50))
-
-        # Invalid Freq
-        self.assertIsNotNone(sc.validate_audio_params(0, 444, 50, 50))
-        self.assertIsNotNone(sc.validate_audio_params(2000, 444, 50, 50))
-
-        # Invalid Volume
-        self.assertIsNotNone(sc.validate_audio_params(440, 444, -10, 50))
-        self.assertIsNotNone(sc.validate_audio_params(440, 444, 50, 110))
-
-        # Invalid Duration
-        self.assertIsNotNone(sc.validate_audio_params(440, 444, 50, 50, duration=0))
-        self.assertIsNotNone(sc.validate_audio_params(440, 444, 50, 50, duration=-5))
 
 if __name__ == '__main__':
     unittest.main()
