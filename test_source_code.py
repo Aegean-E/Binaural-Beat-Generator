@@ -24,7 +24,7 @@ sys.path.append(os.getcwd())
 
 # Load SourceCode module
 try:
-    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode')
+    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode.py')
     spec = importlib.util.spec_from_loader(loader.name, loader)
     source_code = importlib.util.module_from_spec(spec)
     loader.exec_module(source_code)

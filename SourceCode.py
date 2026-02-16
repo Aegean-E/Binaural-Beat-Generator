@@ -1126,3 +1126,5 @@ def main():
     stop_button.grid(row=2, column=1, pady=10)
 
     root.mainloop()
+if __name__ == "__main__":
+    main()

@@ -12,10 +12,57 @@
 
 ---
 
-A scientifically verified **binaural and monaural beat generator** with a **standalone executable** for Windows.
+A scientifically verified **binaural and monaural beat generator**.
 This tool allows you to generate precise neuro-acoustic states using mathematically verified DSP algorithms.
 
 Designed to be **simple, technical, and honest** : no accounts, no tracking, no cloud.
+
+---
+
+## 🛠 Prerequisites
+
+- **Python 3.8+**
+- **System Audio Libraries**:
+    - **Linux**: `libportaudio2` (e.g., `sudo apt install libportaudio2`)
+    - **Windows/macOS**: Usually included with `sounddevice` wheels, but might require drivers.
+
+## 📦 Installation
+
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/Aegean-E/BinauralBeatGenerator.git
+    cd BinauralBeatGenerator
+    ```
+
+2.  **Create a Virtual Environment** (Recommended):
+    ```bash
+    python -m venv venv
+    # Linux/macOS:
+    source venv/bin/activate
+    # Windows:
+    .\venv\Scripts\activate
+    ```
+
+3.  **Install Dependencies**:
+    ```bash
+    pip install numpy scipy sounddevice ttkbootstrap
+    ```
+
+## 🚀 Usage
+
+To run the application:
+
+```bash
+python SourceCode.py
+```
+
+### Modes
+- **Manual Mode**: Set fixed Left/Right frequencies directly.
+- **Ramp Mode**: Enable "Binaural Ramp" to transition from a Start Beat to an End Beat over a set duration.
+
+### Export
+- Use **User Profile -> Export User Profile** to save settings.
+- (Audio export is handled via the "Generate Beat" logic, or specific export features if implemented in UI).
 
 ---
 
@@ -52,7 +99,7 @@ Every generated signal can be validated against the following criteria:
 You can run the application with the `--debug` flag to perform a self-test of the DSP engine upon startup:
 
 ```bash
-python SourceCode --debug
+python SourceCode.py --debug
 ```
 
 This will generate a 1-second test tone (Alpha state) and print a full scientific report to the console, detailing measured frequencies, amplitude, and signal health.
@@ -115,6 +162,18 @@ python -m unittest tests/test_scientific_verification.py
 
 ---
 
+## ❓ Troubleshooting
+
+- **No Audio / "PortAudio" Errors**:
+    - Ensure `libportaudio2` is installed.
+    - Check if another application is using the audio device exclusively.
+- **Tkinter Errors**:
+    - On Linux, install `python3-tk` (`sudo apt install python3-tk`).
+- **Permission Errors**:
+    - Ensure you have write access to the directory for saving configs (`~/.binaural_beat_generator`).
+
+---
+
 ## Features
 
 - **Precise Binaural & Monaural Beats**
@@ -124,7 +183,6 @@ python -m unittest tests/test_scientific_verification.py
 - **High-Quality WAV Export**
 - **Real-Time Status Display**
 - **Theme Support** (Dark/Light modes)
-- **No Installation Required** (Standalone EXE available)
 
 ---
 

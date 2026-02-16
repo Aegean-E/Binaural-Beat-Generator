@@ -38,7 +38,7 @@ sys.modules['ttkbootstrap'] = MagicMock()
 # Import SourceCode dynamically
 import importlib.machinery
 try:
-    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode')
+    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode.py')
     spec = importlib.util.spec_from_loader(loader.name, loader)
     SourceCode = importlib.util.module_from_spec(spec)
     sys.modules["SourceCode"] = SourceCode
@@ -48,7 +48,7 @@ try:
 except Exception as e:
     # If we are in tests/ directory, we might need to look up one level
     try:
-        loader = importlib.machinery.SourceFileLoader('SourceCode', '../SourceCode')
+        loader = importlib.machinery.SourceFileLoader('SourceCode', '../SourceCode.py')
         spec = importlib.util.spec_from_loader(loader.name, loader)
         SourceCode = importlib.util.module_from_spec(spec)
         sys.modules["SourceCode"] = SourceCode

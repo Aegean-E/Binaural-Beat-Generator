@@ -23,7 +23,7 @@ sys.modules['numpy'] = MagicMock()
 
 # Load SourceCode
 try:
-    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode')
+    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode.py')
     spec = importlib.util.spec_from_loader(loader.name, loader)
     source_code = importlib.util.module_from_spec(spec)
     sys.modules["SourceCode"] = source_code
