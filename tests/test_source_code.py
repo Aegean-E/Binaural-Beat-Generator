@@ -103,6 +103,30 @@ class TestSourceCode(unittest.TestCase):
         # Test negative duration (should behave like 0 duration based on code logic 'if ramp_s <= 0: return end_beat_hz')
         self.assertEqual(self.module._compute_ramped_beat_hz(10, start, end, -10), end)
 
+    def test_compute_ramped_beat_hz_edge_cases(self):
+        # Additional edge cases for _compute_ramped_beat_hz
+        start = 10.0
+        end = 5.0
+
+        # Test ramp_s = 0.0 with various elapsed times
+        # When ramp_s <= 0, it should always return end_beat_hz immediately
+        self.assertEqual(self.module._compute_ramped_beat_hz(0.0, start, end, 0.0), end)
+        self.assertEqual(self.module._compute_ramped_beat_hz(1.0, start, end, 0.0), end)
+        self.assertEqual(self.module._compute_ramped_beat_hz(-1.0, start, end, 0.0), end)
+        self.assertEqual(self.module._compute_ramped_beat_hz(100.0, start, end, 0.0), end)
+
+        # Test ramp_s < 0.0 (negative duration)
+        self.assertEqual(self.module._compute_ramped_beat_hz(0.0, start, end, -5.0), end)
+        self.assertEqual(self.module._compute_ramped_beat_hz(10.0, start, end, -5.0), end)
+
+        # Test very small negative number
+        self.assertEqual(self.module._compute_ramped_beat_hz(10.0, start, end, -1e-9), end)
+
+        # Test very small positive number (should be normal ramp)
+        # If elapsed is larger than ramp, it should clamp to end
+        tiny_ramp = 1e-9
+        self.assertEqual(self.module._compute_ramped_beat_hz(tiny_ramp * 2, start, end, tiny_ramp), end)
+
     def test_add_user_preset(self):
         # Setup initial config
         # We need to make sure we don't modify the global config permanently across tests
