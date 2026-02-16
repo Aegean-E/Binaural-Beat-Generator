@@ -14,3 +14,11 @@ BINAURAL_PRESETS = [
     {"label": "40 Hz Binaural Beat, 528 Hz Carrier Frequency", "left_hz": 508.0, "right_hz": 548.0},
     {"label": "40 Hz Binaural Beat, 438 Hz Carrier Frequency", "left_hz": 418.0, "right_hz": 458.0},
 ]
+
+BRAINWAVE_RANGES = {
+    "Delta (0.5 - 4 Hz)": (0.5, 4.0),
+    "Theta (4 - 8 Hz)": (4.0, 8.0),
+    "Alpha (8 - 12 Hz)": (8.0, 12.0),
+    "Beta (12 - 30 Hz)": (12.0, 30.0),
+    "Gamma (30 - 80 Hz)": (30.0, 80.0),
+}
