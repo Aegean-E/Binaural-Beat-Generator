@@ -185,9 +185,6 @@ def _start_stream(cfg: AudioConfig):
 
     def callback(outdata, frames, _time_info, status):
         nonlocal phase_l, phase_r
-        if status:
-            pass
-
         now = time.time()
         elapsed = now - start_time
 
