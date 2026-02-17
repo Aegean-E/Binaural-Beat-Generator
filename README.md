@@ -1,21 +1,34 @@
 <div align="center">
 
-# Binaural Beat Generator 0.8.2
+# NeuralBeat 0.9.0
+
+A scientifically verified, local-first binaural and monaural beat generator.
 
 </div>
 
 
 <div align="left">
-  <img src="banner.png" width="1080" alt="Binaural Beat Generator - Banner">
-  <br />
+  <img src="banner.png" width="1080" alt="NeuralBeat - Banner">
 </div>
 
 ---
 
-A scientifically verified **binaural and monaural beat generator**.
-This tool allows you to generate precise neuro-acoustic states using mathematically verified DSP algorithms.
+**NeuralBeat** is a desktop application for generating precise neuro-acoustic states using binaural and monaural beats. It is built on a foundation of mathematical precision and user freedom, providing a powerful tool for focus, meditation, and relaxation without compromising on data privacy or control.
 
-Designed to be **simple, technical, and honest** : no accounts, no tracking, no cloud.
+Designed to be **simple, technical, and honest**: no accounts, no tracking, no cloud.
+
+---
+
+## ✨ Key Features
+
+- **Precise Audio Engine**: Generate mathematically accurate binaural and monaural beats with multiple waveforms (Sine, Square, Sawtooth, Triangle).
+- **Advanced Ramp Control**: Linearly transition from a start beat to an end beat over a specified duration for smooth session progression.
+- **Background Noise Generator**: Mix in White, Pink, or Brown noise to mask distractions and enhance focus.
+- **Real-time Oscilloscope**: A pop-out visualizer displays the live waveform with customizable colors and a merged/split view for detailed analysis.
+- **Full Preset Management**: Comes with built-in presets and allows you to create, save, and remove your own custom frequency settings.
+- **High-Quality WAV Export**: Save your sessions as a lossless WAV file in a background thread, complete with a progress bar.
+- **Modern, Themeable UI**: Features a clean layout with support for multiple dark and light themes to suit your preference.
+- **Scientifically Verified**: Includes a `--debug` mode and a `verification` module to ensure the DSP output is mathematically precise and free of artifacts.
 
 ---
 
@@ -24,14 +37,14 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 - **Python 3.8+**
 - **System Audio Libraries**:
     - **Linux**: `libportaudio2` (e.g., `sudo apt install libportaudio2`)
-    - **Windows/macOS**: Usually included with `sounddevice` wheels, but might require drivers.
+    - **Windows/macOS**: Usually included with the `sounddevice` wheel, but might require audio drivers if issues arise.
 
 ## 📦 Installation
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/Aegean-E/BinauralBeatGenerator.git
-    cd BinauralBeatGenerator
+    git clone https://github.com/Aegean-E/NeuralBeat.git
+    cd NeuralBeat
     ```
 
 2.  **Create a Virtual Environment** (Recommended):
@@ -45,12 +58,12 @@ Designed to be **simple, technical, and honest** : no accounts, no tracking, no 
 
 3.  **Install Dependencies**:
     ```bash
-    pip install numpy scipy sounddevice ttkbootstrap
+    pip install -r requirements.txt
     ```
 
 ## 🚀 Usage
 
-To run the application:
+To run the application, execute the `SourceCode.py` file from the project's root directory:
 
 ```bash
 python SourceCode.py
@@ -106,22 +119,6 @@ This will generate a 1-second test tone (Alpha state) and print a full scientifi
 
 ---
 
-## 🧠 Brainwave Presets
-
-The generator includes standardized brainwave state presets. Selecting a preset automatically configures the beat frequency range for the **Ramp Mode**.
-
-| State | Frequency Range | Associated Mental State |
-| :--- | :--- | :--- |
-| **Delta** | 0.5 – 4 Hz | Deep sleep, healing, detachment |
-| **Theta** | 4 – 8 Hz | Meditation, intuition, memory |
-| **Alpha** | 8 – 12 Hz | Relaxation, visualization, creativity |
-| **Beta** | 12 – 30 Hz | Alertness, concentration, cognition |
-| **Gamma** | 30 – 80 Hz | Peak focus, insight, high-level processing |
-
-*Note: You can adjust the Carrier frequency (Base) independently. Lower carriers (e.g., 100-200Hz) are often preferred for Delta/Theta, while higher carriers (e.g., 400Hz+) are common for Alpha/Beta.*
-
----
-
 ## 🏗 Architecture Overview
 
 ### DSP Engine
@@ -135,6 +132,7 @@ The core audio generation is handled by the `BinauralGenerator` class.
 2.  **Generation**: `generate_block()` produces chunks of audio (e.g., 100ms).
 3.  **Post-Processing**:
     - **Ramping**: Linearly interpolates beat frequency if enabled.
+    - **Noise Mixing**: Adds White, Pink, or Brown noise if enabled.
     - **Limiting**: `tanh` soft clipper.
     - **Fading**: 20ms Fade-In/Out applied to start/stop transitions.
 4.  **Output**:
@@ -170,19 +168,7 @@ python -m unittest tests/test_scientific_verification.py
 - **Tkinter Errors**:
     - On Linux, install `python3-tk` (`sudo apt install python3-tk`).
 - **Permission Errors**:
-    - Ensure you have write access to the directory for saving configs (`~/.binaural_beat_generator`).
-
----
-
-## Features
-
-- **Precise Binaural & Monaural Beats**
-- **Scientifically Verified Output**
-- **Brainwave Presets (Delta, Theta, Alpha, Beta, Gamma)**
-- **Ramp Mode** (Targeted frequency shifts)
-- **High-Quality WAV Export**
-- **Real-Time Status Display**
-- **Theme Support** (Dark/Light modes)
+    - Ensure you have write access to the directory for saving configs (`~/.neuralbeat`).
 
 ---
 

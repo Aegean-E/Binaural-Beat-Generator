@@ -16,6 +16,11 @@ from scipy import signal
 from scipy.io import wavfile
 import ttkbootstrap as tb
 
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 import presets
 import verification
 
@@ -26,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Global Application State
 # =============================================================================
 
+osc_merge_var = None
 live_status_after_id = None
 play_mode = "manual"  # "manual" or "ramp"
 
@@ -37,14 +43,80 @@ ramp_duration_s = 30.0 * 60.0
 manual_left_hz = 432.0
 manual_right_hz = 432.0
 
-APP_DIR = Path.home() / ".binaural_beat_generator"
+APP_DIR = Path.home() / ".neuralbeat"
 CONFIG_PATH = APP_DIR / "config.json"
+
+# Visualizer state
+osc_window = None
+visualizer_canvas = None
+visualizer_ax = None
+line_left = None
+line_right = None
+OSC_BUFFER_SECONDS = 0.05
+osc_plot_buffer_l = None
+osc_plot_buffer_r = None
+
+OSC_COLOR_PALETTES = {
+    "Cyan / Magenta": {
+        "dark": ("#00FFFF", "#FF00FF"),
+        "light": ("#008B8B", "#8B008B")
+    },
+    "Green / Yellow": {
+        "dark": ("#00FF00", "#FFFF00"),
+        "light": ("#006400", "#BDB76B")
+    },
+    "Red / Blue": {
+        "dark": ("#FF4500", "#1E90FF"),
+        "light": ("#DC143C", "#0000CD")
+    }
+}
+
 
 waveforms = {
     "Sine": np.sin,
     "Square": signal.square,
     "Sawtooth": signal.sawtooth,
+    "Triangle": lambda t: signal.sawtooth(t, width=0.5),
 }
+
+# =============================================================================
+# Noise Generation
+# =============================================================================
+
+class NoiseGenerator:
+    """
+    Generates blocks of colored noise with state preservation using digital filters.
+    """
+    def __init__(self):
+        # Pink noise filter coeffs (-3dB/octave)
+        self.pink_b = [0.049922035, -0.095993537, 0.050612699, -0.004408786]
+        self.pink_a = [1, -2.494956002, 2.017265875, -0.522189400]
+        self.pink_zi = signal.lfilter_zi(self.pink_b, self.pink_a)
+
+        # Brown noise filter coeffs (leaky integrator, -6dB/octave)
+        self.brown_b = [1.0]
+        self.brown_a = [1.0, -0.999] # Very close to 1 for strong low-pass
+        self.brown_zi = signal.lfilter_zi(self.brown_b, self.brown_a)
+
+    def _normalize(self, noise):
+        """Normalize noise to have RMS of 1."""
+        rms = np.sqrt(np.mean(noise**2))
+        if rms > 1e-9:
+            return noise / rms
+        return noise
+
+    def generate(self, noise_type, n_samples):
+        if noise_type == "White":
+            return self._normalize(np.random.randn(n_samples))
+        elif noise_type == "Pink":
+            white = np.random.randn(n_samples)
+            noise, self.pink_zi = signal.lfilter(self.pink_b, self.pink_a, white, zi=self.pink_zi)
+            return self._normalize(noise)
+        elif noise_type == "Brown":
+            white = np.random.randn(n_samples)
+            noise, self.brown_zi = signal.lfilter(self.brown_b, self.brown_a, white, zi=self.brown_zi)
+            return self._normalize(noise)
+        return np.zeros(n_samples)
 
 # =============================================================================
 # Configuration & Persistence
@@ -158,6 +230,8 @@ class AudioConfig:
     right_volume: float
     left_waveform: str
     right_waveform: str
+    noise_type: str
+    noise_volume: float
     use_ramp: bool
     left_frequency: float
     right_frequency: float
@@ -171,14 +245,17 @@ def get_audio_config_from_ui() -> AudioConfig:
     try:
         left_volume_val = float(left_volume_entry.get())
         right_volume_val = float(right_volume_entry.get())
+        noise_volume_val = float(noise_volume_entry.get())
     except ValueError:
         raise ValueError("Please enter valid numeric values for volume.")
 
     left_volume = clamp(left_volume_val / 100.0, 0.0, 1.0)
     right_volume = clamp(right_volume_val / 100.0, 0.0, 1.0)
+    noise_volume = clamp(noise_volume_val / 100.0, 0.0, 1.0)
 
     left_waveform = left_waveform_var.get()
     right_waveform = right_waveform_var.get()
+    noise_type = noise_type_var.get()
     use_ramp = bool(ramp_enabled_var.get())
     sample_rate = 44100
 
@@ -206,6 +283,8 @@ def get_audio_config_from_ui() -> AudioConfig:
             right_volume=right_volume,
             left_waveform=left_waveform,
             right_waveform=right_waveform,
+            noise_type=noise_type,
+            noise_volume=noise_volume,
             use_ramp=True,
             left_frequency=0.0,
             right_frequency=0.0,
@@ -231,6 +310,8 @@ def get_audio_config_from_ui() -> AudioConfig:
             right_volume=right_volume,
             left_waveform=left_waveform,
             right_waveform=right_waveform,
+            noise_type=noise_type,
+            noise_volume=noise_volume,
             use_ramp=False,
             left_frequency=m_left,
             right_frequency=m_right,
@@ -251,6 +332,12 @@ class BinauralGenerator:
         self.phase_r = 0.0
         self.samples_generated = 0
         self.ramp_s = cfg.ramp_duration_s
+
+        # Initialize noise generator if needed
+        if self.cfg.noise_type != "None" and self.cfg.noise_volume > 0:
+            self.noise_gen = NoiseGenerator()
+        else:
+            self.noise_gen = None
 
         # Resolve waveform functions
         # Default to Sine if not found to prevent crashes
@@ -344,6 +431,12 @@ class BinauralGenerator:
 
         stereo = np.column_stack((left, right))
 
+        # Generate and mix noise before limiting
+        if self.noise_gen:
+            noise = self.noise_gen.generate(self.cfg.noise_type, frames)
+            # Add mono noise to both channels using broadcasting
+            stereo += (noise * self.cfg.noise_volume)[:, np.newaxis]
+
         # Stateless soft limiter/saturator
         stereo = np.tanh(stereo * self.drive) / self.tanh_drive
         stereo = np.clip(stereo, -1.0, 1.0)
@@ -397,9 +490,11 @@ class AudioEngine:
         self._stream = None
         self.generator = None
         self._lock = threading.Lock()
+        self._data_lock = threading.Lock()
         self.is_playing = False
         self.start_time = 0.0
         self.current_config = None
+        self.last_block = None
 
     def start(self, cfg: AudioConfig):
         # Stop existing stream safely (but don't reset UI state yet)
@@ -420,6 +515,10 @@ class AudioEngine:
                         # This avoids race conditions if self.generator is set to None by stop()
                         data = gen.generate_block(frames)
                         outdata[:] = data
+
+                        # Store the last block for visualization
+                        with self._data_lock:
+                            self.last_block = data.copy()
 
                         # Check if finished (fade out complete)
                         if gen.is_finished:
@@ -482,12 +581,20 @@ class AudioEngine:
                 self._stream = None
             self.is_playing = False
             self.generator = None
+            with self._data_lock:
+                self.last_block = None
             logger.info("Audio stopped")
 
     def get_elapsed_time(self):
         if self.is_playing:
             return time.time() - self.start_time
         return 0.0
+    
+    def get_last_block(self):
+        with self._data_lock:
+            if self.last_block is not None:
+                return self.last_block.copy()
+        return None
 
 audio_engine = AudioEngine()
 
@@ -510,9 +617,163 @@ def stop_audio():
 
     play_mode = "manual"
 
+
 # =============================================================================
 # UI & Interaction
 # =============================================================================
+
+def set_osc_merge_waves():
+    """Saves the merge waves setting and updates the live plot's static elements."""
+    if osc_merge_var is None:
+        return
+
+    is_merged = osc_merge_var.get()
+    config["osc_merge_waves"] = is_merged
+    save_config(config)
+
+    # If window is open, update its appearance in real-time
+    if osc_window and visualizer_ax and visualizer_canvas:
+        try:
+            # Update horizontal line visibility
+            if hasattr(visualizer_ax, '_hline'):
+                visualizer_ax._hline.set_visible(not is_merged)
+
+            # Update Y-ticks
+            if is_merged:
+                visualizer_ax.set_yticks([-1, 0, 1])
+                visualizer_ax.tick_params(axis='y', colors=visualizer_ax.yaxis.label.get_color(), length=4)
+            else:
+                visualizer_ax.set_yticks([])
+                visualizer_ax.tick_params(axis='y', length=0)
+            visualizer_canvas.draw_idle()
+        except Exception:
+            pass # Ignore if widgets are being destroyed
+
+def set_osc_colors(palette_name: str):
+    """Sets the oscilloscope color palette and saves to config."""
+    if palette_name not in OSC_COLOR_PALETTES:
+        return
+
+    config["osc_colors"] = palette_name
+    save_config(config)
+
+    # If oscilloscope is open, update its colors in real-time
+    if osc_window and visualizer_canvas and line_left and line_right:
+        try:
+            is_dark = root.style.theme_use() in ["darkly", "superhero"]
+            theme_mode = "dark" if is_dark else "light"
+
+            colors = OSC_COLOR_PALETTES[palette_name][theme_mode]
+            line_left.set_color(colors[0])
+            line_right.set_color(colors[1])
+            visualizer_canvas.draw_idle()
+        except Exception:
+            # Ignore errors if window/widgets are in a weird state
+            pass
+
+def toggle_oscilloscope_window():
+    """Opens or closes the real-time oscilloscope window."""
+    global osc_window, visualizer_canvas, visualizer_ax, line_left, line_right
+    global osc_plot_buffer_l, osc_plot_buffer_r
+
+    # If window exists, destroy it and clear references
+    if osc_window and osc_window.winfo_exists():
+        osc_window.destroy()
+        osc_window = None
+        visualizer_canvas = None
+        visualizer_ax = None
+        line_left = None
+        line_right = None
+        osc_plot_buffer_l = None
+        osc_plot_buffer_r = None
+        return
+
+    # Create new window
+    osc_window = tb.Toplevel(root)
+    osc_window.title("Real-time Oscilloscope")
+    osc_window.geometry("600x300")
+
+    def on_osc_close():
+        """Callback for when the oscilloscope window is closed by the user."""
+        global osc_window, visualizer_canvas, visualizer_ax, line_left, line_right
+        global osc_plot_buffer_l, osc_plot_buffer_r
+
+        win_to_destroy = osc_window
+
+        # Nullify globals to prevent race conditions with the update loop
+        osc_window = None
+        visualizer_canvas = None
+        visualizer_ax = None
+        line_left = None
+        line_right = None
+        osc_plot_buffer_l = None
+        osc_plot_buffer_r = None
+
+        # Since we overrode the protocol, we are responsible for destroying the window.
+        if win_to_destroy:
+            try:
+                win_to_destroy.destroy()
+            except tk.TclError:
+                pass # Window is already being destroyed
+
+    osc_window.protocol("WM_DELETE_WINDOW", on_osc_close)
+
+    # Initialize plot buffers
+    sample_rate = 44100  # Match audio engine
+    buffer_size = int(OSC_BUFFER_SECONDS * sample_rate)
+    osc_plot_buffer_l = np.zeros(buffer_size, dtype=np.float32)
+    osc_plot_buffer_r = np.zeros(buffer_size, dtype=np.float32)
+
+    fig = Figure(figsize=(5, 2), dpi=100)
+    visualizer_ax = fig.add_subplot(111)
+
+    # Style the plot to match the theme
+    is_dark = root.style.theme_use() in ["darkly", "superhero"]
+    theme_mode = "dark" if is_dark else "light"
+
+    current_palette_name = config.get("osc_colors", "Cyan / Magenta")
+    palette = OSC_COLOR_PALETTES.get(current_palette_name, OSC_COLOR_PALETTES["Cyan / Magenta"])
+    colors = palette[theme_mode]
+    line_color_l, line_color_r = colors
+
+    bg_color = root.style.colors.get("bg")
+    fg_color = root.style.colors.get("fg")
+
+    fig.patch.set_facecolor(bg_color)
+    visualizer_ax.set_facecolor(bg_color)
+    visualizer_ax.tick_params(axis='both', colors=fg_color, length=0)
+    visualizer_ax.spines['bottom'].set_color(fg_color)
+    visualizer_ax.spines['top'].set_color(fg_color)
+    visualizer_ax.spines['left'].set_color(fg_color)
+    visualizer_ax.spines['right'].set_color(fg_color)
+    visualizer_ax.xaxis.label.set_color(fg_color)
+    visualizer_ax.yaxis.label.set_color(fg_color)
+
+    # Add a horizontal line to separate channels, and store a reference to it
+    visualizer_ax._hline = visualizer_ax.axhline(0, color=fg_color, lw=0.5, ls='--')
+
+    x_data = np.arange(buffer_size)
+    line_left, = visualizer_ax.plot(x_data, osc_plot_buffer_l, lw=1, color=line_color_l)
+    line_right, = visualizer_ax.plot(x_data, osc_plot_buffer_r, lw=1, color=line_color_r)
+
+    visualizer_ax.set_ylim(-1.1, 1.1)
+    visualizer_ax.set_xlim(0, buffer_size)
+    visualizer_ax.set_xticks([])
+
+    # Set initial view based on config
+    is_merged = config.get("osc_merge_waves", False)
+    visualizer_ax._hline.set_visible(not is_merged)
+    if is_merged:
+        visualizer_ax.set_yticks([-1, 0, 1])
+        visualizer_ax.tick_params(axis='y', colors=fg_color, length=4)
+    else:
+        visualizer_ax.set_yticks([])
+        visualizer_ax.tick_params(axis='y', length=0)
+
+    fig.tight_layout()
+
+    visualizer_canvas = FigureCanvasTkAgg(fig, master=osc_window)
+    visualizer_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
 def _run_export_thread(cfg, filename, duration, progress_win, progress_bar, progress_label, on_success, on_error):
     """Background thread function for exporting audio to a WAV file."""
@@ -841,6 +1102,8 @@ def delete_preset():
 def update_live_status():
     """Updates the status bar with current frequencies and remaining time."""
     global live_status_after_id
+    global osc_merge_var
+    global osc_plot_buffer_l, osc_plot_buffer_r
 
     # If window is gone, do not reschedule
     try:
@@ -872,7 +1135,46 @@ def update_live_status():
     else:
         status_var.set("Beat: — Hz | L: — Hz | R: — Hz")
 
-    live_status_after_id = root.after(200, update_live_status)
+    # Update Oscilloscope
+    if visualizer_canvas:
+        try:
+            is_merged = config.get("osc_merge_waves", False)
+            block = audio_engine.get_last_block()
+            if block is not None and len(block) > 0 and osc_plot_buffer_l is not None:
+                n_frames = len(block)
+
+                # Roll the buffers and append new data
+                osc_plot_buffer_l = np.roll(osc_plot_buffer_l, -n_frames)
+                osc_plot_buffer_r = np.roll(osc_plot_buffer_r, -n_frames)
+                osc_plot_buffer_l[-n_frames:] = block[:, 0]
+                osc_plot_buffer_r[-n_frames:] = block[:, 1]
+
+                # Update the plot data
+                if is_merged:
+                    line_left.set_ydata(osc_plot_buffer_l)
+                    line_right.set_ydata(osc_plot_buffer_r)
+                else:
+                    line_left.set_ydata(0.5 + osc_plot_buffer_l * 0.5)
+                    line_right.set_ydata(-0.5 + osc_plot_buffer_r * 0.5)
+                visualizer_canvas.draw_idle()
+
+            elif not audio_engine.is_playing:
+                # Clear the buffers and the plot when stopped
+                if osc_plot_buffer_l is not None and np.any(osc_plot_buffer_l):
+                    osc_plot_buffer_l.fill(0)
+                    osc_plot_buffer_r.fill(0)
+                    if is_merged:
+                        line_left.set_ydata(osc_plot_buffer_l)
+                        line_right.set_ydata(osc_plot_buffer_r)
+                    else:
+                        line_left.set_ydata(0.5 + osc_plot_buffer_l * 0.5)
+                        line_right.set_ydata(-0.5 + osc_plot_buffer_r * 0.5)
+                    visualizer_canvas.draw_idle()
+        except Exception:
+            # Window might have been closed during update. Ignore.
+            pass
+
+    live_status_after_id = root.after(50, update_live_status)
 
 def on_close():
     try:
@@ -916,8 +1218,8 @@ def main():
     global right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox
     global monaural_beats_frame, binaural_beats_frame
     global preset_name_entry, preset_category_var
-    global carrier_entry, start_beat_entry, end_beat_entry, ramp_minutes_entry
-    global status_var, ramp_enabled_var, brainwave_var
+    global carrier_entry, start_beat_entry, end_beat_entry, ramp_minutes_entry, noise_type_var, noise_volume_entry
+    global status_var, ramp_enabled_var, osc_merge_var
 
     import sys
     if "--debug" in sys.argv:
@@ -931,6 +1233,8 @@ def main():
                 sample_rate=44100,
                 left_volume=0.8,
                 right_volume=0.8,
+                noise_type="None",
+                noise_volume=0.0,
                 left_waveform="Sine",
                 right_waveform="Sine",
                 use_ramp=False,
@@ -988,8 +1292,11 @@ def main():
         # I'll let it run.
 
     root = tb.Window(themename=initial_theme)
-    root.title("Binaural Beat Generator 0.8.2")
+    root.title("NeuralBeat 0.9.0")
     root.protocol("WM_DELETE_WINDOW", on_close)
+
+    osc_merge_var = tk.BooleanVar(value=config.get("osc_merge_waves", False))
+    status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
 
     menu_bar = tk.Menu(root)
     root.config(menu=menu_bar)
@@ -1009,6 +1316,20 @@ def main():
     theme_menu.add_command(label="Dark (Superhero)", command=lambda: set_theme("superhero"))
     theme_menu.add_command(label="Light (Flatly)", command=lambda: set_theme("flatly"))
 
+    settings_menu.add_separator()
+
+    osc_menu = tk.Menu(settings_menu, tearoff=False)
+    settings_menu.add_cascade(label="Oscilloscope", menu=osc_menu)
+    osc_menu.add_command(label="Show/Hide Window", command=toggle_oscilloscope_window)
+    osc_menu.add_separator()
+    color_menu = tk.Menu(osc_menu, tearoff=False)
+    osc_menu.add_cascade(label="Line Colors", menu=color_menu)
+    for name in OSC_COLOR_PALETTES:
+        color_menu.add_command(label=name, command=lambda n=name: set_osc_colors(n))
+
+    osc_menu.add_separator()
+    osc_menu.add_checkbutton(label="Merge Waves", variable=osc_merge_var, command=set_osc_merge_waves)
+
     left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox = create_frequency_control_frame(
         root, "Left Ear Frequency (Hz)", 0, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
     )
@@ -1019,7 +1340,7 @@ def main():
 
     # Presets UI (built-in presets.py + user presets from config.json)
     presets_frame = ttk.LabelFrame(root, text="Presets")
-    presets_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    presets_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky="nsew")
 
     monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
     monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
@@ -1056,74 +1377,92 @@ def main():
     build_preset_buttons()
 
     # Ramp controls (under frequency frames)
-    ramp_frame = ttk.LabelFrame(root, text="Binaural Ramp")
-    ramp_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    advanced_controls_frame = ttk.LabelFrame(root, text="Advanced Controls")
+    advanced_controls_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-    # Brainwave Preset Selector
-    def apply_brainwave_preset(event):
-        selected = brainwave_var.get()
-        # Extract name part if formatted like "Alpha (8 - 12 Hz)"
-        # But dictionary keys match values in combobox.
-        if selected in presets.BRAINWAVE_RANGES:
-            start, end = presets.BRAINWAVE_RANGES[selected]
-            start_beat_entry.delete(0, tk.END)
-            start_beat_entry.insert(0, str(start))
-            end_beat_entry.delete(0, tk.END)
-            end_beat_entry.insert(0, str(end))
+    # Configure grid to center content
+    advanced_controls_frame.columnconfigure(0, weight=1)
+    advanced_controls_frame.columnconfigure(1, weight=0)
+    advanced_controls_frame.columnconfigure(2, weight=1)
 
-    brainwave_label = ttk.Label(ramp_frame, text="Brainwave Preset:")
-    brainwave_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+    # --- Subsections within the main ramp frame ---
+    noise_subsection_frame = ttk.LabelFrame(advanced_controls_frame, text="Background Noise")
+    noise_subsection_frame.grid(row=0, column=1, padx=10, pady=5)
 
-    brainwave_var = tk.StringVar()
-    brainwave_combo = ttk.Combobox(
-        ramp_frame,
-        textvariable=brainwave_var,
-        values=list(presets.BRAINWAVE_RANGES.keys()),
+    ramp_subsection_frame = ttk.LabelFrame(advanced_controls_frame, text="Ramp Settings")
+    ramp_subsection_frame.grid(row=1, column=1, padx=10, pady=5)
+
+    # --- Populate Background Noise subsection ---
+    noise_type_label = ttk.Label(noise_subsection_frame, text="Noise Type:")
+    noise_type_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
+
+    noise_type_var = tk.StringVar(value="None")
+    noise_type_combo = ttk.Combobox(
+        noise_subsection_frame,
+        textvariable=noise_type_var,
+        values=["None", "White", "Pink", "Brown"],
         state="readonly",
-        width=25
+        width=15
     )
-    brainwave_combo.grid(row=0, column=1, padx=10, pady=6, sticky="w")
-    brainwave_combo.bind("<<ComboboxSelected>>", apply_brainwave_preset)
+    noise_type_combo.grid(row=0, column=1, padx=10, pady=6, sticky="w")
 
+    noise_volume_label = ttk.Label(noise_subsection_frame, text="Volume (%):")
+    noise_volume_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    noise_volume_entry = ttk.Entry(noise_subsection_frame, width=10)
+    noise_volume_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+    noise_volume_entry.insert(0, "10")
+
+    # --- Populate Ramp Settings subsection ---
     ramp_enabled_var = tk.BooleanVar(value=False)
-    ramp_enabled_check = ttk.Checkbutton(ramp_frame, text="Enable Ramp", variable=ramp_enabled_var)
-    ramp_enabled_check.grid(row=1, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+    # Container for the switch to center it
+    switch_container = ttk.Frame(ramp_subsection_frame)
+    switch_container.grid(row=0, column=0, columnspan=2, pady=10)
+    ramp_label = ttk.Label(switch_container, text="Enable Ramp")
+    ramp_label.pack(side='left', padx=5)
+    ramp_switch = ttk.Checkbutton(switch_container, variable=ramp_enabled_var, bootstyle="success-round-toggle")
+    ramp_switch.pack(side='left')
 
-    carrier_label = ttk.Label(ramp_frame, text="Carrier (Hz):")
-    carrier_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
-    carrier_entry = ttk.Entry(ramp_frame, width=10)
-    carrier_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+    carrier_label = ttk.Label(ramp_subsection_frame, text="Carrier (Hz):")
+    carrier_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
+    carrier_entry = ttk.Entry(ramp_subsection_frame, width=10)
+    carrier_entry.grid(row=1, column=1, padx=10, pady=6, sticky="w")
     carrier_entry.insert(0, "432")
 
-    start_beat_label = ttk.Label(ramp_frame, text="Start beat (Hz):")
-    start_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
-    start_beat_entry = ttk.Entry(ramp_frame, width=10)
-    start_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
+    start_beat_label = ttk.Label(ramp_subsection_frame, text="Start beat (Hz):")
+    start_beat_label.grid(row=2, column=0, padx=10, pady=6, sticky="e")
+    start_beat_entry = ttk.Entry(ramp_subsection_frame, width=10)
+    start_beat_entry.grid(row=2, column=1, padx=10, pady=6, sticky="w")
     start_beat_entry.insert(0, "20")
 
-    end_beat_label = ttk.Label(ramp_frame, text="End beat (Hz):")
-    end_beat_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
-    end_beat_entry = ttk.Entry(ramp_frame, width=10)
-    end_beat_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
+    end_beat_label = ttk.Label(ramp_subsection_frame, text="End beat (Hz):")
+    end_beat_label.grid(row=3, column=0, padx=10, pady=6, sticky="e")
+    end_beat_entry = ttk.Entry(ramp_subsection_frame, width=10)
+    end_beat_entry.grid(row=3, column=1, padx=10, pady=6, sticky="w")
     end_beat_entry.insert(0, "3")
 
-    ramp_minutes_label = ttk.Label(ramp_frame, text="Duration (min):")
-    ramp_minutes_label.grid(row=5, column=0, padx=10, pady=6, sticky="e")
-    ramp_minutes_entry = ttk.Entry(ramp_frame, width=10)
-    ramp_minutes_entry.grid(row=5, column=1, padx=10, pady=6, sticky="w")
+    ramp_minutes_label = ttk.Label(ramp_subsection_frame, text="Duration (min):")
+    ramp_minutes_label.grid(row=4, column=0, padx=10, pady=6, sticky="e")
+    ramp_minutes_entry = ttk.Entry(ramp_subsection_frame, width=10)
+    ramp_minutes_entry.grid(row=4, column=1, padx=10, pady=6, sticky="w")
     ramp_minutes_entry.insert(0, "30")
 
-    status_var = tk.StringVar(value="Beat: — Hz | L: — Hz | R: — Hz")
-    status_label = ttk.Label(ramp_frame, textvariable=status_var)
-    status_label.grid(row=6, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+    # --- Bottom control bar ---
+    bottom_frame = ttk.Frame(root)
+    bottom_frame.grid(row=2, column=0, columnspan=3, pady=10, sticky="ew")
+    bottom_frame.columnconfigure(0, weight=1)
+    bottom_frame.columnconfigure(1, weight=1)
+    bottom_frame.columnconfigure(2, weight=1)
+
+    generate_button = ttk.Button(bottom_frame, text="Generate Beat", command=play_audio)
+    generate_button.grid(row=0, column=0, sticky="e", padx=20)
+
+    status_label = ttk.Label(bottom_frame, textvariable=status_var, anchor="center")
+    status_label.grid(row=0, column=1, sticky="ew")
+
+    stop_button = ttk.Button(bottom_frame, text="Stop", command=stop_audio)
+    stop_button.grid(row=0, column=2, sticky="w", padx=20)
 
     update_live_status()
-
-    generate_button = ttk.Button(root, text="Generate Beat", command=play_audio)
-    generate_button.grid(row=2, column=0, pady=10)
-
-    stop_button = ttk.Button(root, text="Stop", command=stop_audio)
-    stop_button.grid(row=2, column=1, pady=10)
 
     root.mainloop()
 if __name__ == "__main__":
