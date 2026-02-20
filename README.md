@@ -185,7 +185,7 @@ This is a **local tool**. Nothing leaves your machine.
 
 ## 📜 License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+This project is licensed under the **Apache License Version 2.0, January 2004**.
 
 - **Twitter**: [@Aegean_E](https://twitter.com/@Aegean_E)  
 - **YouTube**: [Aegean_E](https://youtube.com/@Aegean_E)  
