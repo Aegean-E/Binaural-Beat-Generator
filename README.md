@@ -273,7 +273,7 @@ python SourceCode.py
    - Set duration in minutes
 
 8. **Click "Generate Beat"** to start!
-9. 
+
 ---
 
 <p align="center">
