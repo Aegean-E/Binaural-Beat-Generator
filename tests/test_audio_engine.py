@@ -1,80 +1,132 @@
+"""Test the AudioEngine class from SourceCode.py."""
+
 import unittest
-from unittest.mock import MagicMock, patch, PropertyMock
-import sys
+from unittest.mock import patch, MagicMock
 import os
-import importlib.util
-import importlib.machinery
-import threading
+import sys
+import time
 
-# Mock dependencies before import
-sys.path.append(os.getcwd())
-sys.modules['tkinter'] = MagicMock()
-sys.modules['tkinter.ttk'] = MagicMock()
-sys.modules['tkinter.messagebox'] = MagicMock()
-sys.modules['tkinter.filedialog'] = MagicMock()
-sys.modules['tkinter.simpledialog'] = MagicMock()
-sys.modules['ttkbootstrap'] = MagicMock()
-sys.modules['sounddevice'] = MagicMock()
-sys.modules['scipy'] = MagicMock()
-sys.modules['scipy.signal'] = MagicMock()
-sys.modules['scipy.io'] = MagicMock()
-sys.modules['scipy.io.wavfile'] = MagicMock()
-sys.modules['numpy'] = MagicMock()
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
-# Load SourceCode
-try:
-    loader = importlib.machinery.SourceFileLoader('SourceCode', 'SourceCode.py')
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    source_code = importlib.util.module_from_spec(spec)
-    sys.modules["SourceCode"] = source_code
-    loader.exec_module(source_code)
-except Exception as e:
-    print(f"Error loading SourceCode: {e}")
-    sys.exit(1)
+# Mock heavy dependencies before importing SourceCode to allow testing
+# the AudioEngine's logic without requiring numpy, scipy, or sounddevice.
+mock_scipy = MagicMock()
+mock_scipy.io = MagicMock()
+mock_scipy.signal = MagicMock()
+
+MOCK_MODULES = {
+    'sounddevice': MagicMock(),
+    'tkinter': MagicMock(),
+    'tkinter.ttk': MagicMock(),
+    'ttkbootstrap': MagicMock(),
+}
+
+for mod_name, mock_obj in MOCK_MODULES.items():
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = mock_obj
+
+import SourceCode
+
 
 class TestAudioEngine(unittest.TestCase):
-    def setUp(self):
-        # Create a fresh engine for each test
-        self.engine = source_code.AudioEngine()
-        # Reset sd mock
-        source_code.sd.reset_mock()
+    """Test the AudioEngine class."""
 
-    def test_start_creates_stream(self):
-        cfg = MagicMock()
-        cfg.sample_rate = 44100
+    @patch('SourceCode.sd', MOCK_MODULES['sounddevice'])
+    @patch('SourceCode.BinauralGenerator')
+    def test_start_binaural(self, mock_binaural_gen, mock_sd):
+        """Test starting the audio engine for binaural beats."""
+        engine = SourceCode.AudioEngine()
+        cfg = MagicMock(beat_type='binaural', sample_rate=44100)
 
-        mock_stream_cls = source_code.sd.OutputStream
-        mock_stream_instance = mock_stream_cls.return_value
+        engine.start(cfg)
 
-        # Mock generator constructor
-        # Use patch.object on the loaded module
-        with patch.object(source_code, 'BinauralGenerator') as mock_gen_cls:
-            self.engine.start(cfg)
+        mock_binaural_gen.assert_called_once_with(cfg)
+        self.assertTrue(engine.is_playing)
+        self.assertIsNotNone(engine.generator)
+        mock_sd.OutputStream.assert_called_once()
+        engine._stream.start.assert_called_once()
 
-            mock_gen_cls.assert_called_once_with(cfg)
-            mock_stream_cls.assert_called_once()
-            mock_stream_instance.start.assert_called_once()
-            self.assertTrue(self.engine.is_playing)
+        # Cleanup
+        engine.stop()
 
-    def test_stop_calls_request_stop(self):
-        # Manually set state to simulate playing
-        self.engine.is_playing = True
-        mock_stream = MagicMock()
-        self.engine._stream = mock_stream
-        mock_gen = MagicMock()
-        self.engine.generator = mock_gen
+    @patch('SourceCode.sd', MOCK_MODULES['sounddevice'])
+    @patch('SourceCode.IsochronicGenerator')
+    def test_start_isochronic(self, mock_isochronic_gen, mock_sd):
+        """Test starting the audio engine for isochronic tones."""
+        engine = SourceCode.AudioEngine()
+        cfg = MagicMock(beat_type='isochronic', sample_rate=44100)
 
-        # is_finished is truthy by default (MagicMock)
+        engine.start(cfg)
 
-        with patch('time.sleep') as mock_sleep:
-            self.engine.stop()
+        mock_isochronic_gen.assert_called_once_with(cfg)
+        self.assertTrue(engine.is_playing)
+        self.assertIsNotNone(engine.generator)
+        mock_sd.OutputStream.assert_called_once()
+        engine._stream.start.assert_called_once()
 
-            mock_gen.request_stop.assert_called_once()
-            mock_stream.stop.assert_called_once()
-            mock_stream.close.assert_called_once()
-            self.assertFalse(self.engine.is_playing)
-            self.assertIsNone(self.engine.generator)
-            self.assertIsNone(self.engine._stream)
+        # Cleanup
+        engine.stop()
+
+    @patch('SourceCode.sd', MOCK_MODULES['sounddevice'])
+    @patch('SourceCode.BinauralGenerator')
+    def test_stop(self, mock_binaural_gen, mock_sd):
+        """Test stopping the audio engine."""
+        engine = SourceCode.AudioEngine()
+        cfg = MagicMock(beat_type='binaural', sample_rate=44100)
+
+        # Mock the generator instance
+        mock_gen_instance = mock_binaural_gen.return_value
+        mock_gen_instance.is_finished = False
+
+        engine.start(cfg)
+        self.assertTrue(engine.is_playing)
+
+        engine.stop()
+
+        mock_gen_instance.request_stop.assert_called_once()
+        engine._stream.stop.assert_called_once()
+        engine._stream.close.assert_called_once()
+        self.assertFalse(engine.is_playing)
+        self.assertIsNone(engine.generator)
+        self.assertIsNone(engine.last_block)
+
+    @patch('SourceCode.sd', MOCK_MODULES['sounddevice'])
+    def test_stop_when_not_playing(self, mock_sd):
+        """Test that stop() does nothing if not playing."""
+        engine = SourceCode.AudioEngine()
+        self.assertFalse(engine.is_playing)
+
+        engine.stop()
+
+        mock_sd.OutputStream.assert_not_called()
+
+    @patch('SourceCode.sd', MOCK_MODULES['sounddevice'])
+    @patch('SourceCode.logger')
+    def test_start_exception(self, mock_logger, mock_sd):
+        """Test exception handling during start."""
+        mock_sd.OutputStream.side_effect = Exception("Device error")
+
+        engine = SourceCode.AudioEngine()
+        cfg = MagicMock(beat_type='binaural', sample_rate=44100)
+
+        with self.assertRaises(Exception):
+            engine.start(cfg)
+
+        self.assertFalse(engine.is_playing)
+        mock_logger.error.assert_called_with("Failed to start audio", exc_info=True)
+
+    def test_get_elapsed_time(self):
+        """Test elapsed time calculation."""
+        engine = SourceCode.AudioEngine()
+        self.assertEqual(engine.get_elapsed_time(), 0.0)
+
+        engine.is_playing = True
+        engine.start_time = time.time() - 5.0
+
+        self.assertAlmostEqual(engine.get_elapsed_time(), 5.0, delta=0.1)
+
 
 if __name__ == '__main__':
     unittest.main()

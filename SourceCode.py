@@ -8,6 +8,7 @@ from pathlib import Path
 from tkinter import filedialog
 import logging
 import threading
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -1042,7 +1043,7 @@ def play_audio():
 
 def show_about():
     about_text = """
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0). I appreciate any donations made on Patreon.
+This project is licensed under the Apache License Version 2.0, January 2004. I appreciate any donations made on Patreon.
 
 Social Media Accounts:
 
@@ -1448,7 +1449,15 @@ def main():
         # I'll let it run.
 
     root = tb.Window(themename=initial_theme)
-    root.title("NeuralBeat 0.9.0")
+    root.title("NeuralBeat 1.0.0")
+    
+    # Set window icon
+    try:
+        if os.path.exists("icon.ico"):
+            root.iconbitmap("icon.ico")
+    except Exception:
+        pass
+    
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     osc_merge_var = tk.BooleanVar(value=config.get("osc_merge_waves", False))
