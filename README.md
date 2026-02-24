@@ -15,12 +15,6 @@
 
 ---
 
-<p align="center">
-  <img src="screenshots/ui_main.png" width="800" alt="NeuralBeat - Main UI">
-</p>
-
----
-
 ## 🌟 Why NeuralBeat?
 
 **NeuralBeat** is a precision-engineered desktop application for generating audio tones. Whether you're interested in meditation, focus enhancement, or audio experimentation, NeuralBeat provides the tools you need.
@@ -279,6 +273,12 @@ python SourceCode.py
    - Set duration in minutes
 
 8. **Click "Generate Beat"** to start!
+9. 
+---
+
+<p align="center">
+  <img src="screenshots/ui_main.png" width="800" alt="NeuralBeat - Main UI">
+</p>
 
 ---
 
@@ -295,11 +295,6 @@ python SourceCode.py
 2. Use the Settings menu to change colors
 3. Toggle "Merge Waves" to overlay or split channels
 4. Close the window when done
-
-#### Exporting to WAV
-1. (Feature location in UI - configure your session)
-2. Progress bar shows export status
-3. File is saved to your selected location
 
 ---
 
