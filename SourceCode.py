@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 osc_merge_var = None
 live_status_after_id = None
 play_mode = "manual"  # "manual" or "ramp"
+beat_type_var = None  # "binaural", "monaural", or "isochronic"
 
 # Defaults
 ramp_carrier_hz = 432.0
@@ -144,17 +145,18 @@ initial_theme = config.get("theme", "darkly")
 
 def _normalize_category(category: str) -> str:
     c = str(category).strip().lower()
-    if c == "binaural":
+    if "binaural" in c or "monaural" in c:
         return "Binaural"
-    if c == "monaural":
-        return "Monaural"
-    raise ValueError("Category must be 'Monaural' or 'Binaural'")
+    if "isochronic" in c:
+        return "Isochronic"
+    raise ValueError("Category must be 'Binaural Beat / Monaural Beat' or 'Isochronic Tone'")
 
 def get_user_presets() -> dict:
     up = config.get("user_presets", {})
     return {
         "Monaural": list(up.get("Monaural", [])),
         "Binaural": list(up.get("Binaural", [])),
+        "Isochronic": list(up.get("Isochronic", [])),
     }
 
 def add_user_preset(category: str, label: str, left_hz: float, right_hz: float) -> None:
@@ -192,6 +194,7 @@ def get_all_presets() -> dict:
     return {
         "Monaural": list(presets.MONAURAL_PRESETS) + up["Monaural"],
         "Binaural": list(presets.BINAURAL_PRESETS) + up["Binaural"],
+        "Isochronic": list(presets.ISOCHRONIC_PRESETS) + up["Isochronic"],
     }
 
 # =============================================================================
@@ -239,6 +242,7 @@ class AudioConfig:
     start_beat_hz: float
     end_beat_hz: float
     ramp_duration_s: float
+    beat_type: str = "binaural"
 
 def get_audio_config_from_ui() -> AudioConfig:
     """Reads values from UI entries and returns an AudioConfig object."""
@@ -258,6 +262,7 @@ def get_audio_config_from_ui() -> AudioConfig:
     noise_type = noise_type_var.get()
     use_ramp = bool(ramp_enabled_var.get())
     sample_rate = 44100
+    beat_type = beat_type_var.get() if beat_type_var else "binaural"
 
     if use_ramp:
         try:
@@ -291,7 +296,8 @@ def get_audio_config_from_ui() -> AudioConfig:
             carrier_hz=r_carrier,
             start_beat_hz=r_start,
             end_beat_hz=r_end,
-            ramp_duration_s=ramp_duration_s
+            ramp_duration_s=ramp_duration_s,
+            beat_type=beat_type
         )
     else:
         try:
@@ -300,9 +306,17 @@ def get_audio_config_from_ui() -> AudioConfig:
         except ValueError:
             raise ValueError("Please enter valid numeric values for frequencies.")
 
-        err = validate_audio_params(m_left, m_right, left_volume_val, right_volume_val)
-        if err:
-            raise ValueError(err)
+        if beat_type == "isochronic":
+            if not (0.1 <= m_left <= 100.0):
+                raise ValueError("Beat frequency must be between 0.1 Hz and 100 Hz for isochronic tones.")
+            if not (20.0 <= m_right <= 20000.0):
+                raise ValueError("Carrier frequency must be between 20 Hz and 20000 Hz.")
+        else:
+            err = validate_audio_params(m_left, m_right, left_volume_val, right_volume_val)
+            if err:
+                raise ValueError(err)
+
+        carrier_hz = m_right if beat_type == "isochronic" else 0.0
 
         return AudioConfig(
             sample_rate=sample_rate,
@@ -315,10 +329,11 @@ def get_audio_config_from_ui() -> AudioConfig:
             use_ramp=False,
             left_frequency=m_left,
             right_frequency=m_right,
-            carrier_hz=0.0,
+            carrier_hz=carrier_hz,
             start_beat_hz=0.0,
             end_beat_hz=0.0,
-            ramp_duration_s=0.0
+            ramp_duration_s=0.0,
+            beat_type=beat_type
         )
 
 class BinauralGenerator:
@@ -481,6 +496,108 @@ class BinauralGenerator:
         self.samples_generated += frames
         return stereo.astype(np.float32, copy=False)
 
+
+class IsochronicGenerator:
+    """
+    Generates isochronic tones - rhythmic pulses of sound at a specific beat frequency.
+    The carrier tone pulses on and off at the beat rate with equal intensity on both channels.
+    """
+    def __init__(self, cfg: AudioConfig):
+        self.cfg = cfg
+        self.phase = 0.0
+        self.samples_generated = 0
+        self.ramp_s = cfg.ramp_duration_s
+
+        if self.cfg.noise_type != "None" and self.cfg.noise_volume > 0:
+            self.noise_gen = NoiseGenerator()
+        else:
+            self.noise_gen = None
+
+        self.wave_func = waveforms.get(cfg.left_waveform, np.sin)
+
+        self.drive = 2.5
+        self.tanh_drive = np.tanh(self.drive)
+
+        self.fade_in_len = int(0.02 * cfg.sample_rate)
+        self.fade_out_len = int(0.02 * cfg.sample_rate)
+        self.stopping = False
+        self.fade_out_counter = 0
+        self.is_finished = False
+
+    def request_stop(self):
+        self.stopping = True
+
+    def generate_block(self, frames: int) -> np.ndarray:
+        current_time = self.samples_generated / self.cfg.sample_rate
+
+        if self.cfg.use_ramp:
+            t_global = current_time + np.arange(frames, dtype=np.float64) / self.cfg.sample_rate
+
+            if self.ramp_s <= 0:
+                beat_hz = np.full(frames, self.cfg.end_beat_hz, dtype=np.float64)
+            else:
+                progress = np.clip(t_global / self.ramp_s, 0.0, 1.0)
+                beat_hz = self.cfg.start_beat_hz + (self.cfg.end_beat_hz - self.cfg.start_beat_hz) * progress
+
+            beat_hz = np.maximum(0.1, beat_hz)
+            carrier_hz = np.full(frames, self.cfg.carrier_hz, dtype=np.float64)
+        else:
+            beat_hz = np.full(frames, max(0.1, self.cfg.left_frequency), dtype=np.float64)
+            carrier_hz = np.full(frames, max(20.0, self.cfg.carrier_hz), dtype=np.float64)
+
+        inc = (2.0 * np.pi * carrier_hz / self.cfg.sample_rate)
+        phase_shift = np.concatenate(([0.0], np.cumsum(inc)[:-1]))
+        phase_vec = self.phase + phase_shift
+        self.phase = (self.phase + np.sum(inc)) % (2.0 * np.pi)
+
+        carrier_wave = self.wave_func(phase_vec)
+
+        period_samples = self.cfg.sample_rate / beat_hz
+        pulse = np.mod(np.arange(frames, dtype=np.float64) + self.samples_generated, period_samples) < (period_samples * 0.5)
+
+        mono = self.cfg.left_volume * carrier_wave * pulse.astype(np.float64)
+
+        stereo = np.column_stack((mono, mono))
+
+        if self.noise_gen:
+            noise = self.noise_gen.generate(self.cfg.noise_type, frames)
+            stereo += (noise * self.cfg.noise_volume)[:, np.newaxis]
+
+        stereo = np.tanh(stereo * self.drive) / self.tanh_drive
+        stereo = np.clip(stereo, -1.0, 1.0)
+
+        start_idx = self.samples_generated
+        if start_idx < self.fade_in_len:
+            ramp_in = np.arange(start_idx, start_idx + frames, dtype=np.float32) / self.fade_in_len
+            ramp_in = np.clip(ramp_in, 0.0, 1.0)
+            stereo *= ramp_in[:, np.newaxis]
+
+        if self.stopping:
+            remaining = self.fade_out_len - self.fade_out_counter
+            if remaining <= 0:
+                stereo.fill(0)
+                self.is_finished = True
+                self.samples_generated += frames
+                return stereo
+
+            t_fade = np.arange(self.fade_out_counter, self.fade_out_counter + frames, dtype=np.float32)
+            ramp_out = 1.0 - (t_fade / self.fade_out_len)
+            ramp_out = np.clip(ramp_out, 0.0, 1.0)
+
+            stereo *= ramp_out[:, np.newaxis]
+
+            self.fade_out_counter += frames
+
+            if self.fade_out_counter >= self.fade_out_len:
+                self.is_finished = True
+                cutoff = int(remaining)
+                if cutoff < frames:
+                    stereo[cutoff:] = 0
+
+        self.samples_generated += frames
+        return stereo.astype(np.float32, copy=False)
+
+
 class AudioEngine:
     """
     Manages the audio playback stream using sounddevice.
@@ -497,13 +614,14 @@ class AudioEngine:
         self.last_block = None
 
     def start(self, cfg: AudioConfig):
-        # Stop existing stream safely (but don't reset UI state yet)
         self.stop()
 
         with self._lock:
             try:
-                # Capture generator in local variable for callback to ensure thread safety
-                gen = BinauralGenerator(cfg)
+                if cfg.beat_type == "isochronic":
+                    gen = IsochronicGenerator(cfg)
+                else:
+                    gen = BinauralGenerator(cfg)
                 self.generator = gen
                 self.current_config = cfg
 
@@ -1027,30 +1145,55 @@ def import_config_json():
         logger.error("Error importing config", exc_info=True)
         messagebox.showerror("Import Error", str(e))
 
-def apply_preset(left_hz: float, right_hz: float):
-    left_frequency_entry.delete(0, tk.END)
-    right_frequency_entry.delete(0, tk.END)
-    left_frequency_entry.insert(0, str(left_hz))
-    right_frequency_entry.insert(0, str(right_hz))
+def apply_preset(left_hz: float = 0, right_hz: float = 0, category: str = "Binaural", carrier_hz: float = None, pulse_hz: float = None):
+    if category == "Isochronic" and carrier_hz is not None and pulse_hz is not None:
+        left_frequency_entry.delete(0, tk.END)
+        right_frequency_entry.delete(0, tk.END)
+        left_frequency_entry.insert(0, str(pulse_hz))
+        right_frequency_entry.insert(0, str(carrier_hz))
+        
+        if beat_type_var:
+            beat_type_var.set("isochronic")
+        if carrier_entry:
+            carrier_entry.delete(0, tk.END)
+            carrier_entry.insert(0, str(carrier_hz))
+    else:
+        left_frequency_entry.delete(0, tk.END)
+        right_frequency_entry.delete(0, tk.END)
+        left_frequency_entry.insert(0, str(left_hz))
+        right_frequency_entry.insert(0, str(right_hz))
+        if beat_type_var:
+            beat_type_var.set("binaural")
 
 def build_preset_buttons():
     allp = get_all_presets()
-    category_frames = {
-        "Monaural": monaural_beats_frame,
-        "Binaural": binaural_beats_frame,
-    }
+    
+    # Clear frames
+    for w in binaural_monaural_frame.winfo_children():
+        w.destroy()
+    for w in isochronic_beats_frame.winfo_children():
+        w.destroy()
 
-    for category, frame in category_frames.items():
-        for w in frame.winfo_children():
-            w.destroy()
+    # Combined Binaural + Monaural presets
+    combined_presets = allp["Binaural"] + allp["Monaural"]
+    for i, p in enumerate(combined_presets):
+        btn = ttk.Button(
+            binaural_monaural_frame,
+            text=p["label"],
+            command=lambda l=p["left_hz"], r=p["right_hz"], c="Binaural": apply_preset(l, r, c)
+        )
+        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
 
-        for i, p in enumerate(allp[category]):
-            btn = ttk.Button(
-                frame,
-                text=p["label"],
-                command=lambda l=p["left_hz"], r=p["right_hz"]: apply_preset(l, r)
-            )
-            btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+    # Isochronic presets - use carrier_hz and pulse_hz
+    for i, p in enumerate(allp["Isochronic"]):
+        carrier = p.get("carrier_hz", 200.0)
+        pulse = p.get("pulse_hz", 10.0)
+        btn = ttk.Button(
+            isochronic_beats_frame,
+            text=p["label"],
+            command=lambda c=carrier, pl=pulse: apply_preset(0, 0, "Isochronic", carrier_hz=c, pulse_hz=pl)
+        )
+        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
 
 def save_current_as_preset():
     try:
@@ -1126,12 +1269,22 @@ def update_live_status():
             rem_m = int(remaining_s // 60)
             rem_s = int(remaining_s % 60)
 
-            status_var.set(
-                f"Beat: {beat:.2f} Hz | L: {lf:.2f} Hz | R: {rf:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
-            )
+            current_beat_type = beat_type_var.get() if beat_type_var else "binaural"
+            if current_beat_type == "isochronic":
+                status_var.set(
+                    f"Isochronic: {beat:.2f} Hz Beat | Carrier: {ramp_carrier_hz:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
+                )
+            else:
+                status_var.set(
+                    f"Beat: {beat:.2f} Hz | L: {lf:.2f} Hz | R: {rf:.2f} Hz | Remaining: {rem_m:02d}:{rem_s:02d}"
+                )
         else:
             beat = abs(manual_right_hz - manual_left_hz)
-            status_var.set(f"Beat: {beat:.2f} Hz | L: {manual_left_hz:.2f} Hz | R: {manual_right_hz:.2f} Hz")
+            current_beat_type = beat_type_var.get() if beat_type_var else "binaural"
+            if current_beat_type == "isochronic":
+                status_var.set(f"Isochronic: {manual_left_hz:.2f} Hz Beat | Carrier: {manual_right_hz:.2f} Hz")
+            else:
+                status_var.set(f"Beat: {beat:.2f} Hz | L: {manual_left_hz:.2f} Hz | R: {manual_right_hz:.2f} Hz")
     else:
         status_var.set("Beat: — Hz | L: — Hz | R: — Hz")
 
@@ -1189,17 +1342,20 @@ def create_frequency_control_frame(parent, title, column, waveform_options, defa
     frame = ttk.LabelFrame(parent, text=title)
     frame.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
 
-    ttk.Label(frame, text="Frequency:").grid(row=0, column=0, padx=10, pady=10)
+    freq_label = ttk.Label(frame, text="Frequency (Hz):")
+    freq_label.grid(row=0, column=0, padx=10, pady=10)
     freq_entry = ttk.Entry(frame)
     freq_entry.grid(row=0, column=1, padx=10, pady=10)
     freq_entry.insert(0, default_freq)
 
-    ttk.Label(frame, text="Volume (%):").grid(row=1, column=0, padx=10, pady=10)
+    vol_label = ttk.Label(frame, text="Volume (%):")
+    vol_label.grid(row=1, column=0, padx=10, pady=10)
     vol_entry = ttk.Entry(frame)
     vol_entry.grid(row=1, column=1, padx=10, pady=10)
     vol_entry.insert(0, default_vol)
 
-    ttk.Label(frame, text="Waveform:").grid(row=2, column=0, padx=10, pady=10)
+    waveform_label = ttk.Label(frame, text="Waveform:")
+    waveform_label.grid(row=2, column=0, padx=10, pady=10)
     waveform_var = tk.StringVar()
     waveform_combobox = ttk.Combobox(
         frame,
@@ -1209,17 +1365,17 @@ def create_frequency_control_frame(parent, title, column, waveform_options, defa
     waveform_combobox.grid(row=2, column=1, padx=10, pady=10)
     waveform_combobox.set(default_waveform)
 
-    return freq_entry, vol_entry, waveform_var, waveform_combobox
+    return freq_entry, vol_entry, waveform_var, waveform_combobox, freq_label, vol_label, waveform_label, frame
 
 def main():
     """Main application entry point. Initializes UI and starts the event loop."""
     global root
     global left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox
     global right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox
-    global monaural_beats_frame, binaural_beats_frame
+    global monaural_beats_frame, binaural_beats_frame, isochronic_beats_frame, binaural_monaural_frame
     global preset_name_entry, preset_category_var
     global carrier_entry, start_beat_entry, end_beat_entry, ramp_minutes_entry, noise_type_var, noise_volume_entry
-    global status_var, ramp_enabled_var, osc_merge_var
+    global status_var, ramp_enabled_var, osc_merge_var, beat_type_var
 
     import sys
     if "--debug" in sys.argv:
@@ -1330,26 +1486,48 @@ def main():
     osc_menu.add_separator()
     osc_menu.add_checkbutton(label="Merge Waves", variable=osc_merge_var, command=set_osc_merge_waves)
 
-    left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox = create_frequency_control_frame(
-        root, "Left Ear Frequency (Hz)", 0, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
+    beat_type_var = tk.StringVar(value="binaural")
+
+    left_frequency_entry, left_volume_entry, left_waveform_var, left_waveform_combobox, left_freq_label, left_vol_label, left_waveform_lbl, left_freq_frame = create_frequency_control_frame(
+        root, "Left Ear Frequency", 0, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
     )
 
-    right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox = create_frequency_control_frame(
-        root, "Right Ear Frequency (Hz)", 1, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
+    right_frequency_entry, right_volume_entry, right_waveform_var, right_waveform_combobox, right_freq_label, right_vol_label, right_waveform_lbl, right_freq_frame = create_frequency_control_frame(
+        root, "Right Ear Frequency", 1, list(waveforms.keys()), default_freq="432", default_vol="50", default_waveform="Sine"
     )
+
+    def update_freq_labels(*args):
+        bt = beat_type_var.get() if beat_type_var else "binaural"
+        if bt == "isochronic":
+            left_freq_label.config(text="Pulse Rate (Hz):")
+            right_freq_label.config(text="Carrier Tone (Hz):")
+            left_freq_frame.config(text="Isochronic Tone Settings")
+            right_freq_frame.config(text="Isochronic Tone Settings")
+        else:
+            left_freq_label.config(text="Frequency (Hz):")
+            right_freq_label.config(text="Frequency (Hz):")
+            left_freq_frame.config(text="Left Ear Frequency")
+            right_freq_frame.config(text="Right Ear Frequency")
+
+    beat_type_var.trace_add("write", update_freq_labels)
+    update_freq_labels()
 
     # Presets UI (built-in presets.py + user presets from config.json)
     presets_frame = ttk.LabelFrame(root, text="Presets")
-    presets_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky="nsew")
+    presets_frame.grid(row=0, column=2, rowspan=3, padx=10, pady=10, sticky="nsew")
+    presets_frame.columnconfigure(0, weight=1)
+    presets_frame.columnconfigure(1, weight=1)
+    presets_frame.rowconfigure(0, weight=1)
+    presets_frame.rowconfigure(1, weight=0)
 
-    monaural_beats_frame = ttk.LabelFrame(presets_frame, text="Monaural Beats")
-    monaural_beats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    binaural_monaural_frame = ttk.LabelFrame(presets_frame, text="Binaural Beat / Monaural Beat")
+    binaural_monaural_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
 
-    binaural_beats_frame = ttk.LabelFrame(presets_frame, text="Binaural Beats")
-    binaural_beats_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    isochronic_beats_frame = ttk.LabelFrame(presets_frame, text="Isochronic Tone")
+    isochronic_beats_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
 
     create_preset_frame = ttk.LabelFrame(presets_frame, text="Create / Remove Preset (User Presets)")
-    create_preset_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    create_preset_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
 
     preset_name_label = ttk.Label(create_preset_frame, text="Name (Exact):")
     preset_name_label.grid(row=0, column=0, padx=10, pady=6, sticky="e")
@@ -1358,11 +1536,11 @@ def main():
 
     preset_category_label = ttk.Label(create_preset_frame, text="Type:")
     preset_category_label.grid(row=1, column=0, padx=10, pady=6, sticky="e")
-    preset_category_var = tk.StringVar(value="Binaural")
+    preset_category_var = tk.StringVar(value="Binaural Beat / Monaural Beat")
     preset_category_combo = ttk.Combobox(
         create_preset_frame,
         textvariable=preset_category_var,
-        values=["Binaural", "Monaural"],
+        values=["Binaural Beat / Monaural Beat", "Isochronic Tone"],
         state="readonly",
         width=25
     )
@@ -1378,19 +1556,35 @@ def main():
 
     # Ramp controls (under frequency frames)
     advanced_controls_frame = ttk.LabelFrame(root, text="Advanced Controls")
-    advanced_controls_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    advanced_controls_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
     # Configure grid to center content
     advanced_controls_frame.columnconfigure(0, weight=1)
     advanced_controls_frame.columnconfigure(1, weight=0)
     advanced_controls_frame.columnconfigure(2, weight=1)
 
-    # --- Subsections within the main ramp frame ---
-    noise_subsection_frame = ttk.LabelFrame(advanced_controls_frame, text="Background Noise")
-    noise_subsection_frame.grid(row=0, column=1, padx=10, pady=5)
+    # --- Beat Type selector ---
+    beat_type_container = ttk.Frame(advanced_controls_frame)
+    beat_type_container.grid(row=0, column=0, columnspan=3, pady=5)
+    
+    beat_type_subsection = ttk.LabelFrame(beat_type_container, text="Beat Type")
+    beat_type_subsection.pack()
+    beat_type_subsection.columnconfigure(0, weight=1)
+    beat_type_subsection.columnconfigure(1, weight=1)
 
-    ramp_subsection_frame = ttk.LabelFrame(advanced_controls_frame, text="Ramp Settings")
-    ramp_subsection_frame.grid(row=1, column=1, padx=10, pady=5)
+    ttk.Radiobutton(beat_type_subsection, text="Binaural Beat / Monaural Beat", variable=beat_type_var, value="binaural").grid(row=0, column=0, padx=10, pady=5)
+    ttk.Radiobutton(beat_type_subsection, text="Isochronic Tone", variable=beat_type_var, value="isochronic").grid(row=0, column=1, padx=10, pady=5)
+
+    # --- Subsections within the main ramp frame ---
+    noise_container = ttk.Frame(advanced_controls_frame)
+    noise_container.grid(row=1, column=0, columnspan=3, pady=5)
+    noise_subsection_frame = ttk.LabelFrame(noise_container, text="Background Noise")
+    noise_subsection_frame.pack()
+
+    ramp_container = ttk.Frame(advanced_controls_frame)
+    ramp_container.grid(row=2, column=0, columnspan=3, pady=5)
+    ramp_subsection_frame = ttk.LabelFrame(ramp_container, text="Ramp Settings")
+    ramp_subsection_frame.pack()
 
     # --- Populate Background Noise subsection ---
     noise_type_label = ttk.Label(noise_subsection_frame, text="Noise Type:")
@@ -1448,7 +1642,7 @@ def main():
 
     # --- Bottom control bar ---
     bottom_frame = ttk.Frame(root)
-    bottom_frame.grid(row=2, column=0, columnspan=3, pady=10, sticky="ew")
+    bottom_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="ew")
     bottom_frame.columnconfigure(0, weight=1)
     bottom_frame.columnconfigure(1, weight=1)
     bottom_frame.columnconfigure(2, weight=1)

@@ -15,6 +15,13 @@ BINAURAL_PRESETS = [
     {"label": "40 Hz Binaural Beat, 438 Hz Carrier Frequency", "left_hz": 418.0, "right_hz": 458.0},
 ]
 
+ISOCHRONIC_PRESETS = [
+    {"label": "4 Hz Pulse, 432 Hz Carrier", "carrier_hz": 432.0, "pulse_hz": 4.0},
+    {"label": "8 Hz Pulse, 432 Hz Carrier", "carrier_hz": 432.0, "pulse_hz": 8.0},
+    {"label": "16 Hz Pulse, 432 Hz Carrier", "carrier_hz": 432.0, "pulse_hz": 16.0},
+    {"label": "40 Hz Pulse, 432 Hz Carrier", "carrier_hz": 432.0, "pulse_hz": 40.0},
+]
+
 BRAINWAVE_RANGES = {
     "Delta (0.5 - 4 Hz)": (0.5, 4.0),
     "Theta (4 - 8 Hz)": (4.0, 8.0),

@@ -2,7 +2,7 @@
 
 # NeuralBeat 0.9.0
 
-A scientifically verified, local-first binaural and monaural beat generator.
+A scientifically verified, local-first binaural beat, monaural beat, and isochronic tone generator.
 
 </div>
 
@@ -13,7 +13,7 @@ A scientifically verified, local-first binaural and monaural beat generator.
 
 ---
 
-**NeuralBeat** is a desktop application for generating precise neuro-acoustic states using binaural and monaural beats. It is built on a foundation of mathematical precision and user freedom, providing a powerful tool for focus, meditation, and relaxation without compromising on data privacy or control.
+**NeuralBeat** is a desktop application for generating precise neuro-acoustic states using binaural beats, monaural beats, and isochronic tones. It is built on a foundation of mathematical precision and user freedom, providing a powerful tool for focus, meditation, and relaxation without compromising on data privacy or control.
 
 Designed to be **simple, technical, and honest**: no accounts, no tracking, no cloud.
 
@@ -21,7 +21,7 @@ Designed to be **simple, technical, and honest**: no accounts, no tracking, no c
 
 ## ✨ Key Features
 
-- **Precise Audio Engine**: Generate mathematically accurate binaural and monaural beats with multiple waveforms (Sine, Square, Sawtooth, Triangle).
+- **Precise Audio Engine**: Generate mathematically accurate binaural beats, monaural beats, and isochronic tones with multiple waveforms (Sine, Square, Sawtooth, Triangle).
 - **Advanced Ramp Control**: Linearly transition from a start beat to an end beat over a specified duration for smooth session progression.
 - **Background Noise Generator**: Mix in White, Pink, or Brown noise to mask distractions and enhance focus.
 - **Real-time Oscilloscope**: A pop-out visualizer displays the live waveform with customizable colors and a merged/split view for detailed analysis.
@@ -185,11 +185,10 @@ This is a **local tool**. Nothing leaves your machine.
 
 ## 📜 License
 
-This project is licensed under the **Apache License Version 2.0, January 2004**.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
 - **Twitter**: [@Aegean_E](https://twitter.com/@Aegean_E)  
-- **YouTube**: [Aegean_E](https://youtube.com/@Aegean_E)  
-- **Patreon**: [Aegean_E](https://www.patreon.com/Aegean_E)  
+- **YouTube**: [Aegean_E](https://youtube.com/@Aegean_E)
 
 ---
 
