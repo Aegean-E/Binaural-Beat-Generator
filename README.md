@@ -35,7 +35,7 @@
 
 Your brain produces electrical waves at different frequencies depending on your mental state. By exposing your brain to specific sound frequencies, you can encourage it to match or "entrain" to desired brainwave patterns. This is the principle behind neuro-acoustic stimulation.
 
-### The Four Main Brainwave States
+### The Five Main Brainwave States
 
 | State | Frequency | Characteristics | Common Uses |
 |-------|-----------|----------------|-------------|
@@ -179,15 +179,10 @@ Isochronic tones represent the most recent advancement in brainwave entrainment 
 
 | Preset Name | Pulse Rate | Carrier Tone | Brainwave State |
 |-------------|------------|--------------|------------------|
-| 6 Hz Pulse @ 200 Hz | 6 Hz | 200 Hz | Theta |
-| 10 Hz Pulse @ 200 Hz | 10 Hz | 200 Hz | Alpha |
-| 14 Hz Pulse @ 200 Hz | 14 Hz | 200 Hz | Beta |
-| 6 Hz Pulse @ 432 Hz | 6 Hz | 432 Hz | Theta |
-| 10 Hz Pulse @ 432 Hz | 10 Hz | 432 Hz | Alpha |
-| 14 Hz Pulse @ 432 Hz | 14 Hz | 432 Hz | Beta |
-| 6 Hz Pulse @ 528 Hz | 6 Hz | 528 Hz | Theta |
-| 10 Hz Pulse @ 528 Hz | 10 Hz | 528 Hz | Alpha |
-| 14 Hz Pulse @ 528 Hz | 14 Hz | 528 Hz | Beta |
+| 4 Hz Pulse @ 432 Hz | 6 Hz | 432 Hz | Theta |
+| 8 Hz Pulse @ 432 Hz | 10 Hz | 432 Hz | Alpha |
+| 16 Hz Pulse @ 432 Hz | 14 Hz | 432 Hz | Beta |
+| 40 Hz Pulse @ 432 Hz | 14 Hz | 432 Hz | Gamma |
 
 ---
 
@@ -474,11 +469,6 @@ NeuralBeat is built on a foundation of user trust and privacy:
 ## 📜 License
 
 This project is licensed under the **Apache License Version 2.0, January 2004**.
-
-You are free to:
-- Use this software for personal or commercial purposes
-- Modify and distribute the source code
-- Use the software privately or publicly
 
 See the LICENSE file for full details.
 
